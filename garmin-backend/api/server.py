@@ -230,11 +230,10 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
             **split,
         }
 
-        # Monthly data — 12 months
-        months_keys: list[tuple[int, int]] = []
-        for i in range(11, -1, -1):
-            m_date = date(today.year, today.month, 1) - timedelta(days=30 * i)
-            months_keys.append((m_date.year, m_date.month))
+        # Monthly data — Jan through current month of current year (same as Garmin path)
+        months_keys: list[tuple[int, int]] = [
+            (today.year, mo) for mo in range(1, today.month + 1)
+        ]
 
         def _fetch_month_strava(yr: int, mo: int):
             import calendar
@@ -724,10 +723,13 @@ def debug_user(user_id: int):
             f"/wellness-service/wellness/daily/{today}",
             params={"date": str(today)},
         )),
-        ("userstats_today", lambda: client.connectapi(
-            "/userstats-service/userstats/timeline",
-            params={"startDate": str(start7), "endDate": str(today)},
-        )),
+        ("activity_steps_sample", lambda: [
+            {"name": a.get("activityName"), "steps": a.get("steps"), "type": a.get("activityType",{}).get("typeKey")}
+            for a in (client.connectapi(
+                "/activitylist-service/activities/search/activities",
+                params={"startDate": _date_str(start7), "endDate": _date_str(today), "limit": 10, "start": 0}
+            ) or [])
+        ]),
     ]
 
     def _safe_probe(fn):
