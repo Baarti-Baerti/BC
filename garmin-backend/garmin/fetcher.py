@@ -193,10 +193,10 @@ def _extract_bmi(entries: list, height_m: float | None = None) -> float | None:
 def fetch_user_height(client: garth.Client) -> float | None:
     """Returns the user's height in metres from their Garmin profile, or None."""
     endpoints = [
-        ("/userprofile-service/userprofile",                           ["userInfo.height", "height"]),
-        ("/userprofile-service/userprofile/personal-information",      ["height", "heightInCentimeters"]),
-        ("/userprofile-service/userprofile/user-settings",             ["height", "heightInCentimeters"]),
-        ("/userprofile-service/personalInformation/user",              ["height", "heightInCentimeters"]),
+        ("/userprofile-service/userprofile/personal-information",      ["biometricProfile.height", "height", "heightInCentimeters"]),
+        ("/userprofile-service/userprofile/user-settings",             ["userData.height", "height", "heightInCentimeters"]),
+        ("/userprofile-service/userprofile",                           ["userInfo.height", "biometricProfile.height", "height"]),
+        ("/userprofile-service/personalInformation/user",              ["biometricProfile.height", "height", "heightInCentimeters"]),
         ("/userprofile-service/userprofile/user-preferences",          ["height", "heightInCentimeters"]),
     ]
 
