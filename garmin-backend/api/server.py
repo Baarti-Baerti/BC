@@ -278,7 +278,7 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
         types = list(dict.fromkeys(a["type"] for a in period_acts if a["type"]))
 
         return {
-            **{k: member.get(k, "") for k in ("id","name","role","emoji","color","bg","garminDevice")},
+            **{k: member.get(k, "") for k in ("id","name","role","emoji","color","bg","garminDevice","picture","provider")},
             "types":        types,
             "calories":     week["calories"],
             "workouts":     week["workouts"],
@@ -291,8 +291,9 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
             "walkKm":       split["walkKm"],
             "otherKm":      split["otherKm"],
             "actKcal":      week["actKcal"],
-            "steps":        0,   # Strava doesn't provide steps
+            "steps":        0,
             "bmi":          0.0,
+            "height_m":     member.get("height_m") or None,
             "week":         week["week"],
             "weekCalories": week["weekCalories"],
             "kmByType":     week["kmByType"],
@@ -311,6 +312,7 @@ def _stub(member: dict[str, Any]) -> dict[str, Any]:
     return {
         **{k: member.get(k,"") for k in safe},
         "calories":0,"workouts":0,"km":0.0,"actKcal":0,"steps":0,"bmi":0.0,
+        "height_m": member.get("height_m") or None,
         "runKm":0.0,"cycleKm":0.0,"virtualKm":0.0,"swimKm":0.0,
         "skiKm":0.0,"walkKm":0.0,"otherKm":0.0,
         "week":[0]*7,"weekCalories":[0]*7,"kmByType":{},
