@@ -1710,11 +1710,22 @@ function renderPoints(){
   // Build a lookup: userId → { month(1-12): challengeKm } for current year only
   // challengeKm applies conversion factors: bike/5, virtual bike/4, swim*4,
   // walking 1:1 only if >30min AND >6.5km/h, running 1:1
+  // Falls back to client-side calculation from per-type km fields if field absent
+  function calcChallengeKm(m) {
+    if (m.challengeKm != null) return m.challengeKm;
+    // Reconstruct from stored per-type km (no walking speed data available client-side)
+    const run  = m.runKm     || 0;
+    const bike = m.cycleKm   || 0;
+    const virt = m.virtualKm || 0;
+    const swim = m.swimKm    || 0;
+    return run + (bike / 5) + (virt / 4) + (swim * 4);
+  }
+
   function monthlyRunMap(u) {
     const map = {};
     (u.monthly || []).forEach(m => {
       if (m.year === currentYear && m.month >= 1 && m.month <= 12) {
-        map[m.month] = m.challengeKm != null ? m.challengeKm : (m.runKm || 0);
+        map[m.month] = calcChallengeKm(m);
       }
     });
     return map;
@@ -1742,11 +1753,10 @@ function renderPoints(){
   const ytdRunKm = {};
   if (dataCache['ytd'] && Array.isArray(dataCache['ytd'])) {
     dataCache['ytd'].forEach(u => {
-      // Sum challengeKm across all months from YTD monthly data
       const ytdMonthly = u.monthly || [];
       ytdRunKm[u.id] = ytdMonthly
         .filter(m => m.year === currentYear)
-        .reduce((s, m) => s + (m.challengeKm != null ? m.challengeKm : (m.runKm || 0)), 0);
+        .reduce((s, m) => s + calcChallengeKm(m), 0);
     });
   } else {
     users.forEach(u => {
