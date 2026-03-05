@@ -697,6 +697,53 @@ def debug_activity_types(user_id: int):
         return jsonify({"error": str(exc), "type": type(exc).__name__}), 500
 
 
+@app.get("/api/debug/bmi/<int:user_id>")
+def debug_bmi(user_id: int):
+    """Show raw weight/BMI API responses for a user to diagnose missing BMI."""
+    member = g.get_member(user_id)
+    if not member:
+        return jsonify({"error": "member not found"}), 404
+    try:
+        from datetime import date, timedelta
+        client = g.get_client(user_id)
+        today  = date.today()
+        start  = date(today.year, 1, 1)
+        height_m = g.fetch_user_height(client)
+
+        probes = {}
+        for path, params in [
+            ("/weight-service/weight/dateRange",      {"startDate": str(start), "endDate": str(today)}),
+            ("/weight-service/weight/range",          {"startDate": str(start), "endDate": str(today)}),
+            ("/weight-service/weight",                {"startDate": str(start), "endDate": str(today)}),
+        ]:
+            try:
+                raw = client.connectapi(path, params=params)
+                entries = (
+                    raw.get("dateWeightList")
+                    or raw.get("allWeightMetrics")
+                    or raw.get("weightList")
+                    or raw.get("weights")
+                    or (raw if isinstance(raw, list) else [])
+                )
+                probes[path] = {
+                    "top_level_keys": list(raw.keys()) if isinstance(raw, dict) else "list",
+                    "entry_count": len(entries),
+                    "sample": entries[-3:] if entries else [],
+                }
+            except Exception as exc:
+                probes[path] = {"error": str(exc)}
+
+        latest_bmi = g.fetch_latest_bmi(client)
+        return jsonify({
+            "user": member["name"],
+            "height_m": height_m,
+            "latest_bmi_computed": latest_bmi,
+            "probes": probes,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.get("/api/debug/<int:user_id>")
 def debug_user(user_id: int):
     """Debug endpoint — shows exactly what happens when fetching a user."""
