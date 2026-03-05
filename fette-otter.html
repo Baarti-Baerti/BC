@@ -1224,6 +1224,33 @@
   </div>
 </div>
 
+<!-- ── HEIGHT MODAL ── -->
+<div class="modal-overlay" id="heightModal">
+  <div class="modal-box" style="max-width:360px">
+    <div class="modal-header" style="background:linear-gradient(135deg,#ede9fe,#ddd6fe)">
+      <span class="modal-header-icon">📏</span>
+      <h2 style="color:#4c1d95">One quick thing…</h2>
+      <p style="color:#6d28d9;font-size:.82rem">Your height isn't set in Garmin, so we can't calculate your BMI. Enter it once and we'll remember it.</p>
+      <button class="modal-close" onclick="closeHeightModal()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:24px 28px 28px">
+      <div class="field">
+        <label>Your height</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input type="number" id="heightCmInput" placeholder="e.g. 178" min="100" max="250"
+            style="flex:1" onkeydown="if(event.key==='Enter') submitHeight()">
+          <span style="font-weight:700;color:var(--muted)">cm</span>
+        </div>
+      </div>
+      <div class="modal-msg" id="heightModalMsg" style="margin-bottom:12px"></div>
+      <div style="display:flex;gap:12px">
+        <button class="btn-secondary" onclick="closeHeightModal()" style="flex:1">Skip</button>
+        <button class="btn-primary" onclick="submitHeight()" style="flex:1" id="heightBtn">Save height</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ══════════════════════════════════════════════════════════════════
 // BACKEND CONFIG — update these two lines after deploying
@@ -1437,6 +1464,16 @@ function applyData(team, period, isLive) {
       showBanner(`✅ Live data · ${team.length} athlete${team.length!==1?'s':''} · ${periodLabel(period)}`, 'live');
     } else {
       showBanner(`⚡ ${liveCount}/${team.length} athletes live · ${periodLabel(period)}`, 'warning');
+    }
+    // Check if the current user is missing BMI — prompt for height once per session
+    if (currentMember && isLive) {
+      const me = users.find(u => u.id === currentMember.id);
+      const hasBmi = me && me.bmi && me.bmi > 0;
+      const alreadyAsked = sessionStorage.getItem('height_prompted');
+      if (!hasBmi && !alreadyAsked && me?.provider !== 'strava') {
+        sessionStorage.setItem('height_prompted', '1');
+        setTimeout(() => openHeightModal(), 1200);
+      }
     }
   }
   selUser = users[0];
@@ -2218,6 +2255,54 @@ function closeJoinModal() {
 }
 
 function openMyProfile() { openJoinModal(); }
+
+// ── Height modal ──────────────────────────────────────────────────
+function openHeightModal() {
+  document.getElementById('heightCmInput').value = '';
+  document.getElementById('heightModalMsg').innerHTML = '';
+  document.getElementById('heightModal').classList.add('open');
+  setTimeout(() => document.getElementById('heightCmInput').focus(), 100);
+}
+
+function closeHeightModal() {
+  document.getElementById('heightModal').classList.remove('open');
+}
+
+document.getElementById('heightModal').addEventListener('click', function(e) {
+  if (e.target === this) closeHeightModal();
+});
+
+async function submitHeight() {
+  const cm = parseFloat(document.getElementById('heightCmInput').value);
+  const msg = document.getElementById('heightModalMsg');
+  if (!cm || cm < 100 || cm > 250) {
+    msg.innerHTML = '<span style="color:#b91c1c">Please enter a valid height between 100 and 250 cm.</span>';
+    return;
+  }
+  if (!currentMember?.id) {
+    msg.innerHTML = '<span style="color:#b91c1c">Not logged in.</span>';
+    return;
+  }
+  const btn = document.getElementById('heightBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const res = await fetch(`${API_BASE}/api/members/${currentMember.id}/height`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_name: currentMember.name, height_cm: cm }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    closeHeightModal();
+    // Clear cache so next load re-fetches with BMI
+    sessionStorage.removeItem('height_prompted');
+    showBanner('📏 Height saved — BMI will appear on next data refresh', 'live');
+  } catch(e) {
+    msg.innerHTML = `<span style="color:#b91c1c">Error: ${e.message}</span>`;
+    btn.disabled = false;
+    btn.textContent = 'Save height';
+  }
+}
 
 document.getElementById('joinModal').addEventListener('click', function(e) {
   if (e.target === this) closeJoinModal();
