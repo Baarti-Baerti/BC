@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import urllib.request
 import urllib.parse
 from datetime import date, timedelta
@@ -22,6 +23,11 @@ from flask_cors import CORS
 from garth.exc import GarthException, GarthHTTPError
 import garmin as g
 from garmin import strava as sv
+from api.cache import (
+    init_db, get_cached, set_cached, cache_age_seconds,
+    refresh_all_periods, start_scheduler, last_refresh_log,
+    CACHED_PERIODS,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,8 +46,11 @@ if _tokens_b64:
         print(f"⚠️  Token bootstrap failed: {_e}", flush=True)
 
 app = Flask(__name__)
-app.url_map.strict_slashes = False   # /api/members/join/ works same as /api/members/join
+app.url_map.strict_slashes = False
 CORS(app, origins="*")
+
+# Initialise cache DB on startup
+init_db()
 
 # Always return JSON for errors, never HTML
 @app.errorhandler(404)
@@ -777,12 +786,15 @@ def debug_user(user_id: int):
     return jsonify(results)
 
 
-@app.get("/api/team")
-def get_team():
+def load_team(period: str) -> list[dict]:
+    """
+    Fetch live data for all members for the given period.
+    Used by both the scheduler and as a cache-miss fallback.
+    """
     members = g.all_members()
     if not members:
-        return jsonify([])
-    range_start, range_end = _range_dates(request.args.get("range", "thismonth"))
+        return []
+    range_start, range_end = _range_dates(period)
     results = []
     with ThreadPoolExecutor(max_workers=max(len(members), 1)) as pool:
         fmap = {pool.submit(load_user_data, m, range_start, range_end): m for m in members}
@@ -799,7 +811,60 @@ def get_team():
             results.append(payload)
     id_order = {m["id"]: i for i, m in enumerate(members)}
     results.sort(key=lambda u: id_order.get(u["id"], 999))
-    return jsonify(results)
+    return results
+
+
+@app.get("/api/team")
+def get_team():
+    period = request.args.get("range", "thismonth")
+
+    # Serve from cache if available
+    cached, fetched_at = get_cached(period)
+    if cached:
+        age = cache_age_seconds(fetched_at)
+        resp = jsonify(cached)
+        resp.headers["X-Cache"] = "HIT"
+        resp.headers["X-Cache-Age"] = str(int(age)) if age is not None else "?"
+        resp.headers["X-Cache-Fetched"] = fetched_at or ""
+        return resp
+
+    # Cache miss — fetch live and populate cache
+    log.info("Cache miss for period=%s — fetching live", period)
+    results = load_team(period)
+    if results and period in CACHED_PERIODS:
+        set_cached(period, results)
+    resp = jsonify(results)
+    resp.headers["X-Cache"] = "MISS"
+    return resp
+
+
+@app.post("/api/refresh")
+def api_refresh():
+    """Manually trigger a background refresh of all cached periods."""
+    member_id = request.json.get("user_id") if request.json else None
+    member = g.get_member(member_id) if member_id else None
+    if not member or member.get("role") != "admin":
+        abort(403)
+    threading.Thread(
+        target=refresh_all_periods,
+        args=(load_team,),
+        daemon=True,
+    ).start()
+    return jsonify({"status": "refresh started"})
+
+
+@app.get("/api/cache-status")
+def api_cache_status():
+    """Show cache freshness and recent refresh log."""
+    status = {}
+    for period in CACHED_PERIODS:
+        _, fetched_at = get_cached(period)
+        age = cache_age_seconds(fetched_at)
+        status[period] = {
+            "fetched_at": fetched_at,
+            "age_minutes": round(age / 60, 1) if age is not None else None,
+        }
+    return jsonify({"periods": status, "log": last_refresh_log(10)})
 
 
 @app.get("/api/user/<int:user_id>")
@@ -812,6 +877,10 @@ def get_user(user_id: int):
     payload["picture"]      = member.get("picture", "")
     payload["google_email"] = member.get("google_email", "")
     return jsonify(payload)
+
+
+# ── Start background scheduler (after load_team is defined) ──────────────────
+start_scheduler(load_team)
 
 
 if __name__ == "__main__":
