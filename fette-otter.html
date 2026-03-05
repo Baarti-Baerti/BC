@@ -452,16 +452,38 @@
   .pts-table th {
     font-family:'Nunito',sans-serif; font-size:0.72rem; font-weight:800;
     color:var(--muted); text-transform:uppercase; letter-spacing:.06em;
-    padding:0 10px 10px; text-align:center; white-space:nowrap;
+    padding:0 6px 10px; text-align:center; white-space:nowrap;
   }
   .pts-table th:first-child { text-align:left; padding-left:0; }
   .pts-table td {
-    padding:8px 10px; font-family:'Nunito',sans-serif;
+    padding:6px 4px; font-family:'Nunito',sans-serif;
     font-size:0.8rem; font-weight:700; text-align:center;
-    border-top:1px solid var(--border);
+    border-top:1px solid var(--border); vertical-align:top;
   }
   .pts-table td:first-child { text-align:left; padding-left:0; }
   .pts-table tr:hover td { background:var(--surface2); }
+  .pts-month-cell { min-width:52px; }
+  .pts-month-cell.pts-hit { background: #f0fdf4; }
+  .pts-month-cell.pts-current { background: #faf5ff; }
+  .pts-eq-total {
+    font-family:'Nunito',sans-serif; font-size:.72rem; font-weight:900;
+    line-height:1.3; white-space:nowrap;
+  }
+  .pts-bd-row {
+    display:flex; align-items:center; justify-content:center;
+    gap:2px; margin-top:3px;
+    font-size:.55rem; font-weight:700; color:var(--muted);
+    background:var(--surface2); border-radius:4px; padding:1px 3px;
+    white-space:nowrap;
+  }
+  .pts-bd-icon { font-size:.6rem; }
+  .pts-bd-raw  { color:var(--text2); }
+  .pts-bd-arrow { color:#cbd5e1; }
+  .pts-bd-eq   { color:var(--violet); font-weight:800; }
+  .pts-bmi-line {
+    font-size:.52rem; color:var(--muted); font-weight:600;
+    margin-top:3px; line-height:1.2;
+  }
   .pts-dot { display:inline-block; width:10px; height:10px; border-radius:50%; }
   .pts-total {
     font-family:'Nunito',sans-serif; font-size:1rem;
@@ -1633,7 +1655,8 @@ function renderDetail(){
           <div class="detail-role">Rank #${rank}</div>
           <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
             <div class="detail-item"><div class="detail-item-lbl">Sessions</div><div class="detail-item-val" style="color:${u.color}">${u.workouts}</div></div>
-            <div class="detail-item"><div class="detail-item-lbl">Distance</div><div class="detail-item-val">${u.km}<span style="font-size:.9rem">km</span></div></div>
+            <div class="detail-item"><div class="detail-item-lbl">Total orig. km</div><div class="detail-item-val">${u.km}<span style="font-size:.9rem">km</span></div></div>
+            <div class="detail-item"><div class="detail-item-lbl">Total conv. km</div><div class="detail-item-val" style="color:var(--violet)">${((u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.skiKm||0)/5 + (u.walkKm||0)).toFixed(1)}<span style="font-size:.9rem">km</span></div></div>
             <div class="detail-item"><div class="detail-item-lbl">Act. Kcal</div><div class="detail-item-val">${(u.actKcal/1000).toFixed(1)}K</div></div>
             ${u.bmi && u.bmi > 0 ? `<div class="detail-item"><div class="detail-item-lbl">BMI</div><div class="detail-item-val" style="color:${u.bmi<18.5?'#f59e0b':u.bmi<25?'#059669':u.bmi<30?'#f59e0b':'#ef4444'}">${u.bmi.toFixed(1)}</div></div>` : ''}
             ${u.height_m ? `<div class="detail-item"><div class="detail-item-lbl">Height</div><div class="detail-item-val">${Math.round(u.height_m * 100)}<span style="font-size:.9rem">cm</span></div></div>` : ''}
@@ -1893,31 +1916,44 @@ function renderPoints(){
     const monthCells = allMonths.map(m => {
       const isPast    = m < currentMonth;
       const isCurrent = m === currentMonth;
-      const km = runMap[m];  // challengeKm
+      const km = runMap[m];
       const mData = (u.monthly||[]).find(md => md.year === currentYear && md.month === m);
       const bmi = mData?.bmi && mData.bmi > 0 ? mData.bmi : null;
-      const bmiLine = bmi ? `<div style="font-size:.55rem;color:var(--muted);font-weight:600;line-height:1.2;margin-top:2px">${bmi.toFixed(1)}</div>` : '';
 
-      // Build raw breakdown tooltip
-      const rawParts = [];
-      if (mData?.runKm > 0)    rawParts.push(`🏃 ${mData.runKm.toFixed(1)}km`);
-      if (mData?.cycleKm > 0)  rawParts.push(`🚴 ${mData.cycleKm.toFixed(1)}km÷5`);
-      if (mData?.virtualKm > 0) rawParts.push(`💻 ${mData.virtualKm.toFixed(1)}km÷4`);
-      if (mData?.swimKm > 0)   rawParts.push(`🏊 ${mData.swimKm.toFixed(1)}km×4`);
-      if (mData?.walkKm > 0)   rawParts.push(`🚶 ${mData.walkKm.toFixed(1)}km (qual.)`);
-      const breakdown = rawParts.length ? ' | ' + rawParts.join(', ') : '';
-
-      if (isCurrent) {
-        const val = km != null ? km.toFixed(1) : '…';
-        const col = km >= GOAL ? '#059669' : '#f59e0b';
-        return `<td title="${MONTH_NAMES[m-1]}: ${val} eq.km (in progress, goal ${GOAL}km)${breakdown}" style="font-size:.65rem;color:${col}">${val}${bmiLine}</td>`;
-      }
-      if (!isPast) {
+      if (!isPast && !isCurrent) {
         return `<td style="color:#e2e8f8;font-size:.9rem">·</td>`;
       }
-      const hit = (km || 0) >= GOAL;
-      const val = km != null ? km.toFixed(1) : '0.0';
-      return `<td title="${MONTH_NAMES[m-1]}: ${val} eq.km${hit?' ✅':' ❌ (need '+GOAL+'km)'}${breakdown}" style="font-size:.65rem;font-weight:800;color:${hit?'#059669':'#ef4444'}">${val}${bmiLine}</td>`;
+
+      const val  = km != null ? km.toFixed(1) : (isCurrent ? '…' : '0.0');
+      const hit  = (km || 0) >= GOAL;
+      const col  = isCurrent ? (hit ? '#059669' : '#f59e0b') : (hit ? '#059669' : '#ef4444');
+      const badge = isPast ? (hit ? '✅' : '❌') : '⏳';
+
+      // Activity breakdown — only types with km > 0
+      const activities = [];
+      if (mData?.runKm    > 0) activities.push({ icon:'🏃', raw: mData.runKm,     eq: mData.runKm,          factor:'÷1'  });
+      if (mData?.cycleKm  > 0) activities.push({ icon:'🚴', raw: mData.cycleKm,   eq: mData.cycleKm  / 5,   factor:'÷5'  });
+      if (mData?.virtualKm> 0) activities.push({ icon:'💻', raw: mData.virtualKm, eq: mData.virtualKm / 4,  factor:'÷4'  });
+      if (mData?.swimKm   > 0) activities.push({ icon:'🏊', raw: mData.swimKm,    eq: mData.swimKm   * 4,   factor:'×4'  });
+      if (mData?.skiKm    > 0) activities.push({ icon:'⛷️', raw: mData.skiKm,     eq: mData.skiKm    / 5,   factor:'÷5'  });
+      if (mData?.walkKm   > 0) activities.push({ icon:'🚶', raw: mData.walkKm,    eq: mData.walkKm,         factor:'walk'});
+
+      const breakdownHTML = activities.length > 1
+        ? activities.map(a => `<div class="pts-bd-row">
+            <span class="pts-bd-icon">${a.icon}</span>
+            <span class="pts-bd-raw">${a.raw.toFixed(1)}</span>
+            <span class="pts-bd-arrow">→</span>
+            <span class="pts-bd-eq">${a.eq.toFixed(1)}</span>
+          </div>`).join('')
+        : '';
+
+      const bmiLine = bmi ? `<div class="pts-bmi-line">⚖️ ${bmi.toFixed(1)}</div>` : '';
+
+      return `<td class="pts-month-cell${hit && isPast ? ' pts-hit' : ''}${isCurrent ? ' pts-current' : ''}">
+        <div class="pts-eq-total" style="color:${col}">${val} ${badge}</div>
+        ${breakdownHTML}
+        ${bmiLine}
+      </td>`;
     }).join('');
 
     const ruleA = ruleAPoints[u.id] || 0;
