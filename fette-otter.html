@@ -1082,18 +1082,16 @@
       <button class="week-btn" data-range="ytd" onclick="setWeek(this,'ytd')">Year to Date</button>
     </div>
   </div>
-  <div class="main-grid">
-    <!-- Leaderboard -->
-    <div class="panel">
+  <div style="padding:0 24px 24px">
+    <!-- Leaderboard full width -->
+    <div class="panel" style="margin-bottom:20px">
       <div class="panel-header">
         <span class="panel-title">🏆 Leaderboard</span>
       </div>
       <div id="leaderboard"></div>
     </div>
-    <!-- Right column: user detail -->
-    <div class="right-col">
-      <div class="user-detail panel" id="userDetail"></div>
-    </div>
+    <!-- User detail callout below -->
+    <div class="user-detail panel" id="userDetail"></div>
   </div>
 </div><!-- end page-details -->
 
@@ -1484,14 +1482,14 @@ function renderAll(){
 // ════ OVERVIEW ════
 function renderLB(){
   const COLS = [
+    { key:'km',        label:'Total',             fmt: u => fmtKm(u.km),                                     unit:'km' },
     { key:'workouts',  label:'Sessions',         fmt: u => u.workouts||0,                                   unit:'' },
     { key:'runKm',     label:'🏃 Run',            fmt: u => fmtKm(u.runKm),                                  unit:'km' },
     { key:'cycleKm',   label:'🚴 Bike',           fmt: u => fmtKm(u.cycleKm),                                unit:'km' },
     { key:'virtualKm', label:'💻 Virtual bike',   fmt: u => fmtKm(u.virtualKm),                              unit:'km' },
     { key:'swimKm',    label:'🏊 Swim',           fmt: u => fmtKm(u.swimKm),                                 unit:'km' },
     { key:'walkKm',    label:'🚶 Walk',           fmt: u => fmtKm(u.walkKm),                                 unit:'km' },
-    { key:'km',        label:'Total',             fmt: u => fmtKm(u.km),                                     unit:'km' },
-    { key:'actKcal',   label:'Active Calories',   fmt: u => ((u.actKcal||0)/1000).toFixed(1)+'K',                                     unit:'' },
+    { key:'actKcal',   label:'Active Calories',   fmt: u => ((u.actKcal||0)/1000).toFixed(1)+'K',            unit:'' },
   ];
   function fmtKm(v){ return (v||0) > 0 ? (v||0).toFixed(1) : '—'; }
 
@@ -1588,19 +1586,32 @@ function renderDetail(){
   const deviceLabel = u.provider === 'strava' ? 'Strava' : (u.garminDevice || 'Garmin');
 
   document.getElementById('userDetail').innerHTML=`
-    <div class="detail-avatar" style="background:${u.bg}">${u.picture ? `<img src="${u.picture}" style="width:100%;height:100%;border-radius:18px;object-fit:cover">` : u.emoji}</div>
-    <div class="detail-name">${u.name}${provBadge}</div>
-    <div class="detail-role">Rank #${rank}</div>
-    <div class="detail-grid">
-      <div class="detail-item"><div class="detail-item-lbl">Sessions</div><div class="detail-item-val" style="color:${u.color}">${u.workouts}</div></div>
-      <div class="detail-item"><div class="detail-item-lbl">Distance</div><div class="detail-item-val">${u.km}<span style="font-size:.9rem">km</span></div></div>
-      <div class="detail-item"><div class="detail-item-lbl">Act. Kcal</div><div class="detail-item-val">${(u.actKcal/1000).toFixed(1)}K</div></div>
-      ${u.bmi && u.bmi > 0 ? `<div class="detail-item"><div class="detail-item-lbl">BMI</div><div class="detail-item-val" style="color:${u.bmi<18.5?'#f59e0b':u.bmi<25?'#059669':u.bmi<30?'#f59e0b':'#ef4444'}">${u.bmi.toFixed(1)}</div></div>` : ''}
-    </div>
-    <div style="font-size:.65rem;color:var(--muted);margin:16px 0 8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Distance by activity</div>
-    ${distBreakdown}
-    <div style="font-size:.65rem;color:var(--muted);margin:16px 0 6px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">This period's activity</div>
-    <div class="week-grid">${dots}</div>`;
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <!-- Left: avatar + name + stats -->
+      <div style="display:flex;gap:18px;align-items:center;flex-shrink:0">
+        <div class="detail-avatar" style="background:${u.bg}">${u.picture ? `<img src="${u.picture}" style="width:100%;height:100%;border-radius:18px;object-fit:cover">` : u.emoji}</div>
+        <div>
+          <div class="detail-name">${u.name}${provBadge}</div>
+          <div class="detail-role">Rank #${rank}</div>
+          <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+            <div class="detail-item"><div class="detail-item-lbl">Sessions</div><div class="detail-item-val" style="color:${u.color}">${u.workouts}</div></div>
+            <div class="detail-item"><div class="detail-item-lbl">Distance</div><div class="detail-item-val">${u.km}<span style="font-size:.9rem">km</span></div></div>
+            <div class="detail-item"><div class="detail-item-lbl">Act. Kcal</div><div class="detail-item-val">${(u.actKcal/1000).toFixed(1)}K</div></div>
+            ${u.bmi && u.bmi > 0 ? `<div class="detail-item"><div class="detail-item-lbl">BMI</div><div class="detail-item-val" style="color:${u.bmi<18.5?'#f59e0b':u.bmi<25?'#059669':u.bmi<30?'#f59e0b':'#ef4444'}">${u.bmi.toFixed(1)}</div></div>` : ''}
+          </div>
+        </div>
+      </div>
+      <!-- Middle: distance breakdown -->
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:.65rem;color:var(--muted);margin-bottom:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Distance by activity</div>
+        ${distBreakdown}
+      </div>
+      <!-- Right: activity dots -->
+      <div style="flex-shrink:0">
+        <div style="font-size:.65rem;color:var(--muted);margin-bottom:6px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">This period's activity</div>
+        <div class="week-grid">${dots}</div>
+      </div>
+    </div>`;
 }
 
 function renderTypes(){
@@ -1938,9 +1949,10 @@ function renderPoints(){
     }).join('')}
   </div>`;
 
-  el.innerHTML = legend +
+  el.innerHTML =
+    podiumHTML +
     `<div class="lb-scroll"><table class="pts-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>` +
-    podiumHTML;
+    legend.replace('margin-bottom:18px', 'margin-top:18px');
 }
 function setWeek(btn,p){
   document.querySelectorAll('.week-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
