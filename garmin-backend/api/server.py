@@ -535,11 +535,18 @@ def join_mfa():
 
 @app.post("/api/members/<int:member_id>/height")
 def set_member_height(member_id: int):
-    """Admin endpoint to manually set a member's height (cm) for BMI calculation."""
+    """Set a member's height (cm) for BMI calculation.
+    Can be called by the member themselves or by an admin."""
     body       = request.get_json(silent=True) or {}
-    admin_name = (body.get("admin_name") or "").strip()
     ADMIN_NAME = os.environ.get("ADMIN_NAME", "Martin")
-    if admin_name != ADMIN_NAME:
+    requester  = (body.get("admin_name") or body.get("name") or "").strip()
+    # Allow if requester is admin OR if they are the member themselves
+    member = g.get_member(member_id)
+    if not member:
+        abort(404)
+    is_admin = requester == ADMIN_NAME
+    is_self  = requester == member.get("name", "")
+    if not is_admin and not is_self:
         abort(403)
     height_cm = body.get("height_cm")
     if not height_cm or not (100 < float(height_cm) < 250):
