@@ -130,39 +130,62 @@ def fetch_body_composition(
     Fetches body composition data for a date range.
     Tries multiple known Garmin endpoint variants and returns the first
     response that contains weight entries.
+    Manual weight entries (logged in Garmin app) may use different endpoints.
     """
     endpoints = [
-        ("/weight-service/weight/dateRange", {"startDate": _date_str(start), "endDate": _date_str(end)}),
-        ("/weight-service/weight/range",     {"startDate": _date_str(start), "endDate": _date_str(end)}),
+        ("/weight-service/weight/dateRange",        {"startDate": _date_str(start), "endDate": _date_str(end)}),
+        ("/weight-service/weight/range",            {"startDate": _date_str(start), "endDate": _date_str(end)}),
+        ("/weight-service/weight",                  {"startDate": _date_str(start), "endDate": _date_str(end)}),
+        ("/wellness-service/wellness/weightGoal",   {}),
     ]
     for path, params in endpoints:
         try:
-            data = client.connectapi(path, params=params)
-            entries = data.get("dateWeightList") or data.get("allWeightMetrics") or []
+            data = client.connectapi(path, params=params) if params else client.connectapi(path)
+            if not data:
+                continue
+            entries = (
+                data.get("dateWeightList")
+                or data.get("allWeightMetrics")
+                or data.get("weightList")
+                or data.get("weights")
+                or (data if isinstance(data, list) else None)
+                or []
+            )
             if entries:
-                return data
+                return {"dateWeightList": entries}
         except Exception:
             continue
+
     return {}
 
 
 def _extract_bmi(entries: list, height_m: float | None = None) -> float | None:
     """
-    Given weight entries (newest last), return the last BMI value.
-    Uses the bmi field directly if present, otherwise calculates from
-    weight (grams in Garmin) + height_m.
+    Given weight entries, return the most recent valid BMI.
+    Handles multiple field name variants used by Garmin for manual vs device entries.
     """
+    def _weight_kg(entry: dict) -> float | None:
+        """Extract weight in kg from an entry, handling grams or kg variants."""
+        for key in ("weight", "weightInGrams", "weightInKilograms", "value"):
+            w = entry.get(key)
+            if w and float(w) > 0:
+                w = float(w)
+                # Garmin typically stores in grams (>500 means grams, not kg)
+                return w / 1000.0 if w > 500 else w
+        return None
+
     for entry in reversed(entries):
-        bmi = entry.get("bmi")
-        if bmi is not None and float(bmi) > 0:
-            return round(float(bmi), 1)
+        # Try direct BMI field first
+        for bmi_key in ("bmi", "bmiValue", "bodyMassIndex"):
+            bmi = entry.get(bmi_key)
+            if bmi is not None and float(bmi) > 0 and float(bmi) < 60:
+                return round(float(bmi), 1)
+        # Calculate from weight + height
         if height_m and height_m > 0:
-            weight = entry.get("weight")
-            if weight:
-                # Garmin stores weight in grams
-                weight_kg = weight / 1000.0 if weight > 500 else float(weight)
-                calculated = weight_kg / (height_m ** 2)
-                if 10 < calculated < 60:   # sanity check
+            w_kg = _weight_kg(entry)
+            if w_kg:
+                calculated = w_kg / (height_m ** 2)
+                if 10 < calculated < 60:
                     return round(calculated, 1)
     return None
 
@@ -174,6 +197,18 @@ def fetch_user_height(client: garth.Client) -> float | None:
         height_cm = (
             profile.get("userInfo", {}).get("height")
             or profile.get("height")
+            or profile.get("userInfo", {}).get("heightInCentimeters")
+        )
+        if height_cm and float(height_cm) > 0:
+            return float(height_cm) / 100.0
+    except Exception:
+        pass
+    # Try user profile settings endpoint as fallback
+    try:
+        settings = client.connectapi("/userprofile-service/userprofile/personal-information")
+        height_cm = (
+            settings.get("height")
+            or settings.get("heightInCentimeters")
         )
         if height_cm and float(height_cm) > 0:
             return float(height_cm) / 100.0
