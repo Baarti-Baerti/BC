@@ -27,7 +27,7 @@ from typing import Any
 log = logging.getLogger("squad_stats.cache")
 
 # Bump this whenever the payload schema changes — forces cache invalidation on deploy
-CACHE_VERSION = "2"
+CACHE_VERSION = "3"
 
 # ── periods we cache ──────────────────────────────────────────────────────────
 CACHED_PERIODS = ["thismonth", "lastmonth", "ytd"]

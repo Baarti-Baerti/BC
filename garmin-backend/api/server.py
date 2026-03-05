@@ -128,8 +128,9 @@ def load_garmin_user_data(member: dict[str, Any], range_start: date, range_end: 
     try:
         week_acts      = g.fetch_activities(client, range_start, range_end)
         week_summaries = g.fetch_daily_summaries(client, range_start, range_days)
-        height_override = member.get("height_m") or None  # manually set in roster
-        bmi            = g.fetch_latest_bmi(client, height_m_override=height_override)
+        # Height: prefer manually stored value in roster, fall back to Garmin profile
+        height_m = member.get("height_m") or g.fetch_user_height(client) or None
+        bmi            = g.fetch_latest_bmi(client, height_m_override=height_m)
         steps          = g.fetch_steps_range(client, range_start, range_end)
 
         # Fetch and cache profile picture if not already stored
@@ -151,7 +152,7 @@ def load_garmin_user_data(member: dict[str, Any], range_start: date, range_end: 
         def _fetch_month(yr, mo):
             key      = f"{yr}-{mo:02d}"
             acts     = g.fetch_activities_for_month(client, yr, mo)
-            mo_bmi   = g.fetch_bmi_for_month(client, yr, mo, height_m_override=height_override)
+            mo_bmi   = g.fetch_bmi_for_month(client, yr, mo, height_m_override=height_m)
             return key, acts, mo_bmi if mo_bmi is not None else bmi
 
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -177,7 +178,7 @@ def load_garmin_user_data(member: dict[str, Any], range_start: date, range_end: 
             range_end=range_end,
             bmi=bmi,
             steps=steps,
-            height_m=height_override,
+            height_m=height_m,
         )
     except Exception as exc:
         log.exception("Garmin fetch failed user %s: %s", uid, exc)
