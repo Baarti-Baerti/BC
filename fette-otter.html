@@ -1054,13 +1054,32 @@
 
 <!-- NAV TABS -->
 <div class="nav-tabs">
-  <button class="nav-tab active" onclick="switchPage('overview',this)">📊 Overview</button>
+  <button class="nav-tab active" onclick="switchPage('points',this)">🏅 Points</button>
   <button class="nav-tab" onclick="switchPage('monthly',this)">📈 Monthly Progress</button>
+  <button class="nav-tab" onclick="switchPage('details',this)">📊 Details</button>
 </div>
 
-<!-- ══ OVERVIEW PAGE ══ -->
-<div class="page active" id="page-overview">
+<!-- ══ POINTS PAGE ══ -->
+<div class="page active" id="page-points">
+  <div class="panel" style="margin:24px" id="pointsPanel">
+    <div class="panel-header">
+      <span class="panel-title">🏅 Points</span>
+      <span class="panel-badge" id="pointsBadge">YTD</span>
+    </div>
+    <div id="pointsContent" style="padding:0 22px 20px"></div>
+  </div>
+</div><!-- end page-points -->
 
+<!-- ══ MONTHLY PROGRESS PAGE ══ -->
+<div class="page" id="page-monthly">
+  <div class="monthly-page">
+    <div id="mpUserRow" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;align-items:center"></div>
+    <div class="mp-charts" id="mpCharts"></div>
+  </div>
+</div><!-- end page-monthly -->
+
+<!-- ══ DETAILS PAGE ══ -->
+<div class="page" id="page-details">
   <div class="main-grid">
     <!-- Leaderboard -->
     <div class="panel">
@@ -1069,36 +1088,12 @@
       </div>
       <div id="leaderboard"></div>
     </div>
-
-    <!-- Right column -->
+    <!-- Right column: user detail -->
     <div class="right-col">
       <div class="user-detail panel" id="userDetail"></div>
     </div>
-  </div><!-- end main-grid -->
-
-  <!-- ══ POINTS SECTION ══ -->
-  <div class="panel" style="margin:0 24px 24px" id="pointsPanel">
-    <div class="panel-header">
-      <span class="panel-title">🏅 Points</span>
-      <span class="panel-badge" id="pointsBadge">YTD</span>
-    </div>
-    <div id="pointsContent" style="padding:0 22px 20px"></div>
   </div>
-
-</div><!-- end page-overview -->
-
-<!-- ══ MONTHLY PROGRESS PAGE ══ -->
-<div class="page" id="page-monthly">
-  <div class="monthly-page">
-
-    <!-- User selector row -->
-    <div id="mpUserRow" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;align-items:center"></div>
-
-    <!-- Metric charts: one per metric -->
-    <div class="mp-charts" id="mpCharts"></div>
-
-  </div>
-</div>
+</div><!-- end page-details -->
 
 </div><!-- end everything -->
 
@@ -1339,20 +1334,33 @@ function mkRng(seed){let s=seed>>>0;return()=>{s=Math.imul(1664525,s)+1013904223
 function genMonthly(u) {
   const rng = mkRng(u.id * 91337);
   const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth() + 1; // 1-12
   return Array.from({length:12}, (_,mi) => {
-    const d = new Date(today.getFullYear(), today.getMonth() - 11 + mi, 1);
-    const season = 0.82 + 0.32 * Math.sin(mi / 11 * Math.PI);
+    const month = mi + 1; // 1-12
+    const hasData = month <= currentMonth;
+    // Seasonal variation peaks in summer months
+    const season = 0.82 + 0.32 * Math.sin((mi / 11) * Math.PI);
     const noise  = 0.78 + rng() * 0.44;
-    const cal    = Math.round(u.calories * 4.3 * season * noise);
-    const sess   = Math.max(6, Math.round(u.workouts * 4.3 * season * noise));
-    const km     = Math.round(u.km * 4.3 * season * noise * 10) / 10;
-    const actKcal = Math.round(u.actKcal * 4.3 * season * noise);
+    const scale  = hasData ? season * noise : 0;
+    const cal    = hasData ? Math.round(u.calories * 4.3 * scale) : 0;
+    const sess   = hasData ? Math.max(6, Math.round(u.workouts * 4.3 * scale)) : 0;
+    const km     = hasData ? Math.round(u.km * 4.3 * scale * 10) / 10 : 0;
+    const actKcal= hasData ? Math.round(u.actKcal * 4.3 * scale) : 0;
     const bmi    = u.bmi ? Math.round(u.bmi * (0.97 + rng() * 0.06) * 10) / 10 : null;
+    // Distribute km across activity types
+    const runKm    = hasData ? Math.round(km * 0.55 * 10) / 10 : 0;
+    const cycleKm  = hasData ? Math.round(km * 0.25 * 10) / 10 : 0;
+    const virtualKm= hasData ? Math.round(km * 0.10 * 10) / 10 : 0;
+    const swimKm   = hasData ? Math.round(km * 0.05 * 10) / 10 : 0;
+    const walkKm   = hasData ? Math.round(km * 0.05 * 10) / 10 : 0;
     const days   = Array.from({length:28}, () => {
-      return rng() < (sess/28) ? Math.round(rng()*600+280) : 0;
+      return hasData && rng() < (sess/28) ? Math.round(rng()*600+280) : 0;
     });
-    return { year:d.getFullYear(), month:d.getMonth()+1,
-             label:d.toLocaleString('en',{month:'short'}), cal, sess, km, actKcal, bmi, days };
+    return { year: currentYear, month,
+             label: new Date(currentYear, mi, 1).toLocaleString('en',{month:'short'}),
+             cal, sess, km, runKm, cycleKm, virtualKm, swimKm, walkKm,
+             actKcal, bmi, days };
   });
 }
 
@@ -1456,12 +1464,14 @@ function switchPage(p,btn){
   document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
   document.getElementById('page-'+p).classList.add('active');
   btn.classList.add('active');
-  document.getElementById('weekSelector').style.display=p==='overview'?'flex':'none';
+  document.getElementById('weekSelector').style.display = p==='details' ? 'flex' : 'none';
   if(p==='monthly') renderMonthly();
+  if(p==='details') { renderLB(); renderDetail(); }
 }
 
 function renderAll(){
-  renderLB(); renderDetail(); renderPoints();
+  renderPoints();
+  renderLB(); renderDetail();
   setTimeout(()=>{
     document.querySelectorAll('.bar-fill,.cbar,.mc-bar-fill,.umc-bar').forEach(b=>{
       const w=b.style.width; b.style.width='0';
@@ -1711,15 +1721,6 @@ function renderPoints(){
   // challengeKm applies conversion factors: bike/5, virtual bike/4, swim*4,
   // walking 1:1 only if >30min AND >6.5km/h, running 1:1
   // Falls back to client-side calculation from per-type km fields if field absent
-  function calcChallengeKm(m) {
-    if (m.challengeKm != null) return m.challengeKm;
-    // Reconstruct from stored per-type km (no walking speed data available client-side)
-    const run  = m.runKm     || 0;
-    const bike = m.cycleKm   || 0;
-    const virt = m.virtualKm || 0;
-    const swim = m.swimKm    || 0;
-    return run + (bike / 5) + (virt / 4) + (swim * 4);
-  }
 
   function monthlyRunMap(u) {
     const map = {};
@@ -1946,10 +1947,26 @@ function setWeek(btn,p){
 }
 
 // ════ MONTHLY PROGRESS — SVG line charts, one per metric ════
+// ── Challenge km conversion (global — used by MP_METRICS and renderPoints) ──
+function calcChallengeKm(m) {
+  if (m.challengeKm != null) return m.challengeKm;
+  const run  = m.runKm     || 0;
+  const bike = m.cycleKm   || 0;
+  const virt = m.virtualKm || 0;
+  const swim = m.swimKm    || 0;
+  return run + (bike / 5) + (virt / 4) + (swim * 4);
+}
+
 const MP_METRICS = [
-  { key: 'runKm',   label: '🏃 Running Distance',  unit: 'km',   axFmt: v => v.toFixed(0),             valFmt: v => v.toFixed(1) + ' km',      field: m => m.runKm   || 0,    skipZero: false },
-  { key: 'actKcal', label: '⚡ Active Calories',    unit: 'kcal', axFmt: v => (v/1000).toFixed(0)+'K',  valFmt: v => (v/1000).toFixed(1) + 'K', field: m => m.actKcal || 0,    skipZero: false },
-  { key: 'bmi',     label: '⚖️ BMI',                unit: '',     axFmt: v => v.toFixed(1),             valFmt: v => v.toFixed(1),              field: m => m.bmi     || null, skipZero: true  },
+  { key: 'challengeKm', label: '⭐ Equivalent km',      unit: 'km',   axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(1)+' km',        field: m => calcChallengeKm(m) || 0,     skipZero: false },
+  { key: 'runKm',       label: '🏃 Running',            unit: 'km',   axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(1)+' km',        field: m => m.runKm      || 0,           skipZero: false },
+  { key: 'cycleKm',     label: '🚴 Cycling',            unit: 'km',   axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(1)+' km',        field: m => m.cycleKm    || 0,           skipZero: false },
+  { key: 'virtualKm',   label: '💻 Virtual Bike',       unit: 'km',   axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(1)+' km',        field: m => m.virtualKm  || 0,           skipZero: false },
+  { key: 'swimKm',      label: '🏊 Swimming',           unit: 'km',   axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(2)+' km',        field: m => m.swimKm     || 0,           skipZero: false },
+  { key: 'walkKm',      label: '🚶 Walking',            unit: 'km',   axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(1)+' km',        field: m => m.walkKm     || 0,           skipZero: false },
+  { key: 'sess',        label: '🎯 Sessions',           unit: '',     axFmt: v => v.toFixed(0),            valFmt: v => v.toFixed(0),              field: m => m.sess       || 0,           skipZero: false },
+  { key: 'actKcal',     label: '⚡ Active Calories',    unit: 'kcal', axFmt: v => (v/1000).toFixed(0)+'K', valFmt: v => (v/1000).toFixed(1)+'K',   field: m => m.actKcal    || 0,           skipZero: false },
+  { key: 'bmi',         label: '⚖️ BMI',                unit: '',     axFmt: v => v.toFixed(1),            valFmt: v => v.toFixed(1),              field: m => m.bmi        || null,        skipZero: true  },
 ];
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
