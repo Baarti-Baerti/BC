@@ -1559,7 +1559,18 @@ function renderLB(){
       const isZero = raw === 0;
       const isSort = c.key === curMetric;
       const cls = isZero ? 'lb-zero' : isSort ? 'lb-sort-col' : '';
-      return `<td class="${cls}" style="${isSort&&!isZero?'color:'+u.color:''}">${c.fmt(u)}</td>`;
+      let title = '';
+      if (c.key === 'convKm') {
+        const parts = [];
+        if (u.runKm    > 0) parts.push(`🏃 ${(u.runKm).toFixed(1)}km ÷1`);
+        if (u.cycleKm  > 0) parts.push(`🚴 ${(u.cycleKm).toFixed(1)}km ÷5 = ${(u.cycleKm/5).toFixed(1)}`);
+        if (u.virtualKm> 0) parts.push(`💻 ${(u.virtualKm).toFixed(1)}km ÷4 = ${(u.virtualKm/4).toFixed(1)}`);
+        if (u.swimKm   > 0) parts.push(`🏊 ${(u.swimKm).toFixed(1)}km ×4 = ${(u.swimKm*4).toFixed(1)}`);
+        if (u.skiKm    > 0) parts.push(`⛷️ ${(u.skiKm).toFixed(1)}km ÷5 = ${(u.skiKm/5).toFixed(1)}`);
+        if (u.walkKm   > 0) parts.push(`🚶 ${(u.walkKm).toFixed(1)}km ÷1`);
+        title = parts.length ? `title="${parts.join(' | ')}"` : '';
+      }
+      return `<td ${title} class="${cls}" style="${isSort&&!isZero?'color:'+u.color:''}">${c.fmt(u)}</td>`;
     }).join('');
     const providerBadge = u.provider === 'strava'
       ? `<span style="font-size:.6rem;background:#fff3e0;color:#c2410c;border-radius:6px;padding:1px 5px;font-weight:800;margin-left:4px">STR</span>`
