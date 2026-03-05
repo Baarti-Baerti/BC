@@ -436,8 +436,18 @@ def list_members():
     return jsonify([{k: m.get(k) for k in safe} for m in g.all_members()])
 
 
-@app.get("/api/debug/members-raw")
-def debug_members_raw():
+@app.post("/api/admin/clear-cache")
+def clear_cache_endpoint():
+    """Clear all cached team data, forcing fresh fetch on next request."""
+    clear_cache()
+    return jsonify({"ok": True, "message": "Cache cleared"})
+
+
+@app.get("/api/admin/clear-cache")
+def clear_cache_get():
+    """GET version so it can be triggered from browser address bar."""
+    clear_cache()
+    return jsonify({"ok": True, "message": "Cache cleared — reload the dashboard"})
     """Show full raw member records including height_m."""
     return jsonify(g.all_members())
 
