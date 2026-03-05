@@ -762,6 +762,7 @@ def debug_bmi(user_id: int):
                     "top_level_keys": list(data.keys()) if isinstance(data, dict) else type(data).__name__,
                     "raw_height_value": found,
                     "height_m": round(found / 100.0 if found and found > 3 else found, 3) if found else None,
+                    "full_response": data,  # dump everything so we can find the height field
                 }
                 if found and height_m is None:
                     h = found / 100.0 if found > 3 else found
