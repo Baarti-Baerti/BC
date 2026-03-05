@@ -192,39 +192,50 @@ def _extract_bmi(entries: list, height_m: float | None = None) -> float | None:
 
 def fetch_user_height(client: garth.Client) -> float | None:
     """Returns the user's height in metres from their Garmin profile, or None."""
-    try:
-        profile = client.connectapi("/userprofile-service/userprofile")
-        height_cm = (
-            profile.get("userInfo", {}).get("height")
-            or profile.get("height")
-            or profile.get("userInfo", {}).get("heightInCentimeters")
-        )
-        if height_cm and float(height_cm) > 0:
-            return float(height_cm) / 100.0
-    except Exception:
-        pass
-    # Try user profile settings endpoint as fallback
-    try:
-        settings = client.connectapi("/userprofile-service/userprofile/personal-information")
-        height_cm = (
-            settings.get("height")
-            or settings.get("heightInCentimeters")
-        )
-        if height_cm and float(height_cm) > 0:
-            return float(height_cm) / 100.0
-    except Exception:
-        pass
+    endpoints = [
+        ("/userprofile-service/userprofile",                           ["userInfo.height", "height"]),
+        ("/userprofile-service/userprofile/personal-information",      ["height", "heightInCentimeters"]),
+        ("/userprofile-service/userprofile/user-settings",             ["height", "heightInCentimeters"]),
+        ("/userprofile-service/personalInformation/user",              ["height", "heightInCentimeters"]),
+        ("/userprofile-service/userprofile/user-preferences",          ["height", "heightInCentimeters"]),
+    ]
+
+    def _extract_height(data: dict, keys: list[str]) -> float | None:
+        for key in keys:
+            parts = key.split(".")
+            val = data
+            for p in parts:
+                if not isinstance(val, dict):
+                    val = None
+                    break
+                val = val.get(p)
+            if val and float(val) > 0:
+                h = float(val)
+                # Could be cm (130–250) or metres (1.3–2.5)
+                return h / 100.0 if h > 3 else h
+        return None
+
+    for path, keys in endpoints:
+        try:
+            data = client.connectapi(path)
+            h = _extract_height(data, keys)
+            if h and 1.2 < h < 2.5:
+                return round(h, 3)
+        except Exception:
+            continue
     return None
 
 
-def fetch_latest_bmi(client: garth.Client) -> float | None:
+def fetch_latest_bmi(client: garth.Client, height_m_override: float | None = None) -> float | None:
     """
     Returns the most recently recorded BMI, searching back up to 365 days.
     Falls back to calculating from weight + height if bmi field is absent.
+    height_m_override: use this height instead of fetching from profile (for users
+    who haven't set their height in Garmin).
     """
     try:
         today    = date.today()
-        height_m = fetch_user_height(client)
+        height_m = height_m_override or fetch_user_height(client)
         data     = fetch_body_composition(client, today - timedelta(days=365), today)
         entries  = data.get("dateWeightList") or data.get("allWeightMetrics", [])
         return _extract_bmi(entries, height_m)
@@ -232,17 +243,19 @@ def fetch_latest_bmi(client: garth.Client) -> float | None:
         return None
 
 
-def fetch_bmi_for_month(client: garth.Client, year: int, month: int) -> float | None:
+def fetch_bmi_for_month(client: garth.Client, year: int, month: int,
+                        height_m_override: float | None = None) -> float | None:
     """
     Returns the last recorded BMI within a specific calendar month.
     Falls back to calculating from weight + height if bmi field is absent.
+    height_m_override: use this height instead of fetching from profile.
     """
     try:
         import calendar as cal_mod
         _, last_day = cal_mod.monthrange(year, month)
         start    = date(year, month, 1)
         end      = date(year, month, last_day)
-        height_m = fetch_user_height(client)
+        height_m = height_m_override or fetch_user_height(client)
         data     = fetch_body_composition(client, start, end)
         entries  = data.get("dateWeightList") or data.get("allWeightMetrics", [])
         return _extract_bmi(entries, height_m)
