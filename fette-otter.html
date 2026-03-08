@@ -1522,8 +1522,8 @@ function renderAll(){
 // ════ OVERVIEW ════
 function renderLB(){
   const COLS = [
-    { key:'convKm',    label:'Points km',         fmt: u => ((u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.walkKm||0)).toFixed(1), unit:'km' },
-    { key:'km',        label:'Original km',        fmt: u => fmtKm((u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0)), unit:'km' },
+    { key:'convKm',    label:'Points',            fmt: u => (u.monthly||[]).filter(m=>m.year===currentYear).reduce((s,m)=>s+(m.challengeKm!=null?m.challengeKm:calcChallengeKm(m)),0).toFixed(1), unit:'km' },
+    { key:'km',        label:'Original',           fmt: u => fmtKm((u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0)), unit:'km' },
     { key:'workouts',  label:'Sessions',         fmt: u => u.workouts||0,                                   unit:'' },
     { key:'runKm',     label:'🏃 Run',            fmt: u => fmtKm(u.runKm),                                  unit:'km' },
     { key:'cycleKm',   label:'🚴 Bike',           fmt: u => fmtKm(u.cycleKm),                                unit:'km' },
@@ -1536,7 +1536,7 @@ function renderLB(){
 
   const isAdmin = currentMember?.name === 'Martin';
   function metricVal(u, key) {
-    if (key === 'convKm') return (u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.walkKm||0);
+    if (key === 'convKm') return (u.monthly||[]).filter(m=>m.year===currentYear).reduce((s,m)=>s+(m.challengeKm!=null?m.challengeKm:calcChallengeKm(m)),0);
     if (key === 'km')     return (u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0);
     return u[key]||0;
   }
@@ -1556,7 +1556,7 @@ function renderLB(){
     const ac = u.id===selUser?.id ? 'lb-active' : '';
     const cells = COLS.map(c => {
       const raw = c.key === 'convKm'
-        ? (u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.walkKm||0)
+        ? (u.monthly||[]).filter(m=>m.year===currentYear).reduce((s,m)=>s+(m.challengeKm!=null?m.challengeKm:calcChallengeKm(m)),0)
         : c.key === 'km'
         ? (u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0)
         : u[c.key]||0;
@@ -1570,7 +1570,7 @@ function renderLB(){
         if (u.cycleKm  > 0) parts.push(`🚴 ${(u.cycleKm).toFixed(1)}km ÷5 = ${(u.cycleKm/5).toFixed(1)}`);
         if (u.virtualKm> 0) parts.push(`💻 ${(u.virtualKm).toFixed(1)}km ÷4 = ${(u.virtualKm/4).toFixed(1)}`);
         if (u.swimKm   > 0) parts.push(`🏊 ${(u.swimKm).toFixed(1)}km ×4 = ${(u.swimKm*4).toFixed(1)}`);
-        if (u.walkKm   > 0) parts.push(`🚶 ${(u.walkKm).toFixed(1)}km ÷1`);
+        if (u.walkKm   > 0) parts.push(`🚶 ${(u.walkKm).toFixed(1)}km (qual. only)`);
         title = parts.length ? `title="${parts.join(' | ')}"` : '';
       }
       return `<td ${title} class="${cls}" style="${isSort&&!isZero?'color:'+u.color:''}">${c.fmt(u)}</td>`;
@@ -1655,8 +1655,8 @@ function renderDetail(){
           <div class="detail-role">Rank #${rank}</div>
           <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
             <div class="detail-item"><div class="detail-item-lbl">Sessions</div><div class="detail-item-val" style="color:${u.color}">${u.workouts}</div></div>
-            <div class="detail-item"><div class="detail-item-lbl">Original km</div><div class="detail-item-val">${((u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0)).toFixed(1)}<span style="font-size:1.02rem">km</span></div></div>
-            <div class="detail-item"><div class="detail-item-lbl">Points km</div><div class="detail-item-val" style="color:var(--violet)">${((u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.walkKm||0)).toFixed(1)}<span style="font-size:1.02rem">km</span></div></div>
+            <div class="detail-item"><div class="detail-item-lbl">Original</div><div class="detail-item-val">${((u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0)).toFixed(1)}<span style="font-size:1.02rem">km</span></div></div>
+            <div class="detail-item"><div class="detail-item-lbl">Points</div><div class="detail-item-val" style="color:var(--violet)">${(u.monthly||[]).filter(m=>m.year===currentYear).reduce((s,m)=>s+(m.challengeKm!=null?m.challengeKm:calcChallengeKm(m)),0).toFixed(1)}<span style="font-size:1.02rem">km</span></div></div>
             <div class="detail-item"><div class="detail-item-lbl">Act. Kcal</div><div class="detail-item-val">${(u.actKcal/1000).toFixed(1)}K</div></div>
             ${u.bmi && u.bmi > 0 ? `<div class="detail-item"><div class="detail-item-lbl">BMI</div><div class="detail-item-val" style="color:${u.bmi<18.5?'#f59e0b':u.bmi<25?'#059669':u.bmi<30?'#f59e0b':'#ef4444'}">${u.bmi.toFixed(1)}</div></div>` : ''}
             ${u.height_m ? `<div class="detail-item"><div class="detail-item-lbl">Height</div><div class="detail-item-val">${Math.round(u.height_m * 100)}<span style="font-size:1.02rem">cm</span></div></div>` : ''}
