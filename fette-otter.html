@@ -2225,6 +2225,9 @@ function pickMpUser(id) {
 restoreSession();   // must run before loadData so admin check works in renderLB
 loadData('thismonth');
 
+// Auto-refresh every 15 minutes
+setInterval(() => loadData(currentPeriod), 15 * 60 * 1000);
+
 // ══════════════════════════════════════════════════════════════════
 //  GOOGLE SIGN-IN  +  JOIN FLOW
 // ══════════════════════════════════════════════════════════════════
