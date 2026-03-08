@@ -1904,6 +1904,7 @@ function renderPoints(){
       const style = isCurrent ? 'color:var(--violet)' : !isPast ? 'color:#cbd5e1' : '';
       return `<th style="${style}" title="${MONTH_NAMES[m-1]} ${currentYear}${isCurrent?' (in progress)':!isPast?' (upcoming)':''}">${MONTH_NAMES[m-1]}</th>`;
     }).join('')}
+    <th style="border-left:2px solid var(--border);color:var(--text2)" title="Total equivalent km this year">Total km</th>
     <th style="color:#818cf8;border-left:2px solid var(--border)" title="Rule A: +1pt per month ≥${GOAL}km">A</th>
     <th style="color:#34d399" title="Rule B: most YTD run km (+2pts)">B</th>
     <th style="color:#f472b6" title="Rule C: most Rule A points (+2pts)">C</th>
@@ -1971,6 +1972,7 @@ function renderPoints(){
         </div>
       </td>
       ${monthCells}
+      <td style="border-left:2px solid var(--border);font-weight:800;color:var(--text2)">${Object.values(monthlyRunMap(u)).reduce((a,b)=>a+b,0).toFixed(1)}</td>
       <td style="color:#818cf8;font-weight:900;border-left:2px solid var(--border)">${ruleA}</td>
       <td style="color:${hasB?'#34d399':'var(--muted)'};font-weight:${hasB?900:600}">${hasB?'+2':'—'}</td>
       <td style="color:${hasC?'#f472b6':'var(--muted)'};font-weight:${hasC?900:600}">${hasC?'+2':'—'}</td>
