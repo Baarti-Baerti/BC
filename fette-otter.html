@@ -1520,11 +1520,15 @@ function renderAll(){
 }
 
 // ════ OVERVIEW ════
-// Sum of backend-computed challengeKm across all months of current year
-// This matches the "Total km" column in the Points table exactly
+// Sum of backend-computed challengeKm across all months of current year.
+// Always reads from the YTD cache to ensure all months are present,
+// falling back to the user's own monthly array if YTD isn't loaded yet.
 function userPointsKm(u) {
   const cy = new Date().getFullYear();
-  return (u.monthly || [])
+  // Prefer YTD cache entry for this user so we always have full-year monthly data
+  const ytdUser = (dataCache['ytd'] || []).find(r => r.id === u.id);
+  const monthly = (ytdUser ? ytdUser.monthly : null) || u.monthly || [];
+  return monthly
     .filter(m => m.year === cy)
     .reduce((s, m) => s + calcChallengeKm(m), 0);
 }
@@ -2236,8 +2240,8 @@ function pickMpUser(id) {
 restoreSession();   // must run before loadData so admin check works in renderLB
 loadData('thismonth');
 
-// Auto-refresh every 15 minutes
-setInterval(() => loadData(currentPeriod), 15 * 60 * 1000);
+// Auto-refresh every 15 minutes — clear cache first so fresh data is fetched
+setInterval(() => { Object.keys(dataCache).forEach(k => delete dataCache[k]); loadData(currentPeriod); }, 15 * 60 * 1000);
 
 // ══════════════════════════════════════════════════════════════════
 //  GOOGLE SIGN-IN  +  JOIN FLOW
