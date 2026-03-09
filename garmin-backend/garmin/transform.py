@@ -196,7 +196,7 @@ def _challenge_km(activities: list[dict[str, Any]]) -> float:
       - Cycling:        1:5  (5 km bike = 1 km running)
       - VirtualCycling: 1:4  (4 km indoor bike = 1 km running)
       - Swimming:       4:1  (1 km swim = 4 km running)
-      - Walking:        1:1  only if duration > 30 min AND avg speed > 6.5 km/h
+      - Walking:        1:3  only if duration > 30 min AND avg speed > 6.5 km/h (3 km walking = 1 km running)
     """
     total = 0.0
     for a in activities:
@@ -214,7 +214,7 @@ def _challenge_km(activities: list[dict[str, Any]]) -> float:
             dur_min = a["duration_s"] / 60.0
             speed_kmh = (km / (a["duration_s"] / 3600.0)) if a["duration_s"] > 0 else 0
             if dur_min > 30 and speed_kmh > 6.5:
-                total += km
+                total += km / 3.0
     return round(total, 2)
 
 
