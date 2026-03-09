@@ -342,6 +342,7 @@ def build_user_payload(
         "skiKm":        range_split["skiKm"],
         "walkKm":       range_split["walkKm"],
         "otherKm":      range_split["otherKm"],
+        "challengeKm":  _challenge_km(range_acts),
         "actKcal":      week["actKcal"],
         "steps":        steps,
         "bmi":          round(bmi, 1) if bmi else 0.0,
