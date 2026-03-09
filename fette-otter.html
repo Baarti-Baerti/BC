@@ -1324,6 +1324,7 @@ function normaliseUser(raw, idx) {
     garminDevice: raw.garminDevice || raw.garmin_device || '',
     kmByType:     raw.kmByType || {},
     monthly:      raw.monthly || [],
+    challengeKm:  raw.challengeKm ?? null,
     provider:     raw.provider || 'garmin',
     picture:      raw.picture || '',
   };
@@ -1520,8 +1521,11 @@ function renderAll(){
 }
 
 // ════ OVERVIEW ════
-// Converted (points) km for the current period — same fields as all other columns.
+// Converted (points) km — uses the backend-computed challengeKm field on the
+// user object, which applies the correct conversion rules including walk filtering.
+// Falls back to the field-level formula if not available.
 function userPointsKm(u) {
+  if (u.challengeKm != null) return u.challengeKm;
   return (u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.walkKm||0);
 }
 
