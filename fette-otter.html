@@ -1526,7 +1526,8 @@ function renderAll(){
 // Falls back to the field-level formula if not available.
 function userPointsKm(u) {
   if (u.challengeKm != null) return u.challengeKm;
-  return (u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4 + (u.walkKm||0);
+  // Fallback: no backend challengeKm — exclude walk since we can't filter by duration/speed
+  return (u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4;
 }
 
 function renderLB(){
