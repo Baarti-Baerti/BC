@@ -1520,17 +1520,20 @@ function renderAll(){
 }
 
 // ════ OVERVIEW ════
-// Sum of backend-computed challengeKm across all months of current year.
-// Always reads from the YTD cache to ensure all months are present,
-// falling back to the user's own monthly array if YTD isn't loaded yet.
+// Sum of backend-computed challengeKm across all months present on the user object.
+// Uses the same logic as the "Total km" column in the Points table.
 function userPointsKm(u) {
   const cy = new Date().getFullYear();
-  // Prefer YTD cache entry for this user so we always have full-year monthly data
-  const ytdUser = (dataCache['ytd'] || []).find(r => r.id === u.id);
-  const monthly = (ytdUser ? ytdUser.monthly : null) || u.monthly || [];
-  return monthly
-    .filter(m => m.year === cy)
-    .reduce((s, m) => s + calcChallengeKm(m), 0);
+  const seen = new Set();
+  let total = 0;
+  (u.monthly || []).forEach(m => {
+    if (m.year !== cy) return;
+    const key = m.month;
+    if (seen.has(key)) return; // deduplicate — ignore any repeated month entries
+    seen.add(key);
+    total += calcChallengeKm(m);
+  });
+  return total;
 }
 
 function renderLB(){
