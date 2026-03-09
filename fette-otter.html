@@ -1580,9 +1580,9 @@ function renderLB(){
         if (u.cycleKm  > 0.05) parts.push(`🚴 ${(u.cycleKm).toFixed(1)}km ÷5 = ${(u.cycleKm/5).toFixed(1)}`);
         if (u.virtualKm> 0.05) parts.push(`💻 ${(u.virtualKm).toFixed(1)}km ÷4 = ${(u.virtualKm/4).toFixed(1)}`);
         if (u.swimKm   > 0.05) parts.push(`🏊 ${(u.swimKm).toFixed(1)}km ×4 = ${(u.swimKm*4).toFixed(1)}`);
-        const qualWalkLB = u.challengeKm != null
+        const qualWalkLB = Math.round((u.challengeKm != null
           ? Math.max(0, u.challengeKm - (u.runKm||0) - (u.cycleKm||0)/5 - (u.virtualKm||0)/4 - (u.swimKm||0)*4)
-          : 0;
+          : 0) * 10) / 10;
         if (qualWalkLB > 0.05) parts.push(`🚶 ${qualWalkLB.toFixed(1)}km (qualified)`);
         title = parts.length ? `title="${parts.join(' | ')}"` : '';
       }
@@ -1943,8 +1943,8 @@ function renderPoints(){
       if ((mData?.swimKm||0) > 0.05)    rawParts.push(`🏊 ${mData.swimKm.toFixed(1)}km×4`);
       if (mData) {
         const ckm = mData.challengeKm != null ? mData.challengeKm : calcChallengeKm(mData);
-        const qualW = Math.max(0, ckm - (mData.runKm||0) - (mData.cycleKm||0)/5 - (mData.virtualKm||0)/4 - (mData.swimKm||0)*4);
-        if (qualW > 0.01) rawParts.push(`🚶 ${qualW.toFixed(1)}km`);
+        const qualW = Math.round(Math.max(0, ckm - (mData.runKm||0) - (mData.cycleKm||0)/5 - (mData.virtualKm||0)/4 - (mData.swimKm||0)*4) * 10) / 10;
+        if (qualW > 0.05) rawParts.push(`🚶 ${qualW.toFixed(1)}km`);
       }
       const breakdown = rawParts.length ? ' | ' + rawParts.join(', ') : '';
 
@@ -1997,10 +1997,10 @@ function renderPoints(){
         const virt  = months.reduce((s,m)=>s+(m.virtualKm||0),0);
         const swim  = months.reduce((s,m)=>s+(m.swimKm||0),0);
         // Qualifying walk km = challengeKm minus contributions from other sports
-        const qualWalk = months.reduce((s,m)=>{
+        const qualWalk = Math.round(months.reduce((s,m)=>{
           const ckm = m.challengeKm != null ? m.challengeKm : calcChallengeKm(m);
           return s + Math.max(0, ckm - (m.runKm||0) - (m.cycleKm||0)/5 - (m.virtualKm||0)/4 - (m.swimKm||0)*4);
-        },0);
+        },0) * 10) / 10;
         const parts = [];
         if (run      > 0.05) parts.push('🏃 '+run.toFixed(1)+'km ÷1');
         if (bike     > 0.05) parts.push('🚴 '+bike.toFixed(1)+'km ÷5 = '+(bike/5).toFixed(1));
