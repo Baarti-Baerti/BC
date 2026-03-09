@@ -1407,7 +1407,9 @@ let currentPeriod = 'thismonth';
 async function loadData(period = 'thismonth') {
   currentPeriod = period;
 
-  if (dataCache[period]) {
+  // Always fetch fresh if we don't have ytd (needed for Points km calculation)
+  // or if this specific period isn't cached yet
+  if (dataCache[period] && dataCache['ytd']) {
     applyData(dataCache[period], period, true);
     return;
   }
@@ -1520,17 +1522,28 @@ function renderAll(){
 }
 
 // ════ OVERVIEW ════
-// Sum of backend-computed challengeKm across all months present on the user object.
-// Uses the same logic as the "Total km" column in the Points table.
+// Sum of backend-computed challengeKm across all months of current year.
+// Always reads from the YTD cache raw data — the only source with all months.
+// Called at render time so it always reflects the latest cache state.
 function userPointsKm(u) {
   const cy = new Date().getFullYear();
+  const ytdRaw = (dataCache['ytd'] || []).find(r => r.id === u.id);
+  if (!ytdRaw) {
+    // YTD not loaded yet — fall back to whatever monthly data we have, deduplicated
+    const seen = new Set();
+    let total = 0;
+    (u.monthly || []).forEach(m => {
+      if (m.year !== cy || seen.has(m.month)) return;
+      seen.add(m.month);
+      total += calcChallengeKm(m);
+    });
+    return total;
+  }
   const seen = new Set();
   let total = 0;
-  (u.monthly || []).forEach(m => {
-    if (m.year !== cy) return;
-    const key = m.month;
-    if (seen.has(key)) return; // deduplicate — ignore any repeated month entries
-    seen.add(key);
+  (ytdRaw.monthly || []).forEach(m => {
+    if (m.year !== cy || seen.has(m.month)) return;
+    seen.add(m.month);
     total += calcChallengeKm(m);
   });
   return total;
