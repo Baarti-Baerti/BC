@@ -1521,12 +1521,30 @@ function renderAll(){
 }
 
 // ════ OVERVIEW ════
-// Converted (points) km — uses the backend-computed challengeKm field on the
-// user object, which applies the correct conversion rules including walk filtering.
-// Falls back to the field-level formula if not available.
+// Converted (points) km — sums m.challengeKm from monthly entries matching the
+// current period. This uses the same backend-computed values as the Points table,
+// including correct walk filtering (>30min, >6.5km/h).
 function userPointsKm(u) {
-  if (u.challengeKm != null) return u.challengeKm;
-  // Fallback: no backend challengeKm — exclude walk since we can't filter by duration/speed
+  const today = new Date();
+  const cy = today.getFullYear();
+  const cm = today.getMonth() + 1; // 1-12
+  // Determine which month(s) to sum based on current period
+  let monthFilter;
+  if (currentPeriod === 'thismonth') {
+    monthFilter = m => m.year === cy && m.month === cm;
+  } else if (currentPeriod === 'lastmonth') {
+    const lm = cm === 1 ? 12 : cm - 1;
+    const ly = cm === 1 ? cy - 1 : cy;
+    monthFilter = m => m.year === ly && m.month === lm;
+  } else {
+    // ytd or anything else — sum all months this year
+    monthFilter = m => m.year === cy;
+  }
+  const monthly = (u.monthly || []).filter(monthFilter);
+  if (monthly.length > 0) {
+    return monthly.reduce((s, m) => s + (m.challengeKm != null ? m.challengeKm : calcChallengeKm(m)), 0);
+  }
+  // Final fallback: no monthly data at all — exclude walk (can't filter without session data)
   return (u.runKm||0) + (u.cycleKm||0)/5 + (u.virtualKm||0)/4 + (u.swimKm||0)*4;
 }
 
