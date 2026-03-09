@@ -1668,7 +1668,7 @@ function setMetricKey(k){
 
 function renderDetail(){
   const u=selUser;
-  const rank=[...users].sort((a,b)=>b.km-a.km).findIndex(x=>x.id===u.id)+1;
+  const rank=[...users].sort((a,b)=>userPointsKm(b)-userPointsKm(a)).findIndex(x=>x.id===u.id)+1;
   const dots=u.week.map((a,i)=>{
     const bg=a?(u.weekCalories[i]>800?u.color:u.color+'99'):'#e2e8f8';
     return`<div class="day-cell"><div class="day-dot" style="background:${bg}"></div><span>${DAYS[i]}</span></div>`;
