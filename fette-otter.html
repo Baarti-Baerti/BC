@@ -1420,8 +1420,10 @@ let currentPeriod = 'thismonth';
 async function loadData(period = 'thismonth') {
   currentPeriod = period;
 
-  if (dataCache[period]) {
-    applyData(dataCache[period], period, true);
+  const cached = dataCache[period];
+  const cacheAge = cached ? (Date.now() - (cached._ts || 0)) : Infinity;
+  if (cached && cacheAge < 10 * 60 * 1000) {
+    applyData(cached.data, period, true);
     return;
   }
 
@@ -1432,21 +1434,23 @@ async function loadData(period = 'thismonth') {
     const results = await Promise.all(periods.map(p => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30000);
-      return fetch(`${API_BASE}/api/team?range=${p}`, { signal: controller.signal })
+      return fetch(`${API_BASE}/api/team?range=${p}&_=${Date.now()}`, { signal: controller.signal, cache: 'no-store' })
         .then(r => { clearTimeout(timer); return r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`); })
         .catch(e => { clearTimeout(timer); console.warn(`Period ${p} failed:`, e); return null; });
     }));
 
     let anySuccess = false;
+    const ts = Date.now();
     periods.forEach((p, i) => {
       if (results[i] && Array.isArray(results[i])) {
-        dataCache[p] = results[i];
+        dataCache[p] = { data: results[i], _ts: ts };
         anySuccess = true;
       }
     });
 
     if (!anySuccess) throw new Error('All period fetches failed');
-    applyData(dataCache[period] || dataCache['thismonth'] || [], period, true);
+    const entry = dataCache[period] || dataCache['thismonth'];
+    applyData(entry ? entry.data : [], period, true);
 
   } catch(e) {
     console.error('Backend error:', e);
@@ -1456,7 +1460,7 @@ async function loadData(period = 'thismonth') {
     } catch(e2) {
       showBanner(`⚠️ Cannot reach backend — check CORS or Railway URL`, 'warning');
     }
-    periods.forEach(p => { dataCache[p] = null; });
+    periods.forEach(p => { delete dataCache[p]; });
     applyMockData(period);
   }
 }
@@ -1890,8 +1894,8 @@ function renderPoints(){
 
   // Rule B: user with most YTD challenge km (current year) = +2pts
   const ytdRunKm = {};
-  if (dataCache['ytd'] && Array.isArray(dataCache['ytd'])) {
-    dataCache['ytd'].forEach(u => {
+  if (dataCache['ytd'] && dataCache['ytd'].data && Array.isArray(dataCache['ytd'].data)) {
+    dataCache['ytd'].data.forEach(u => {
       const ytdMonthly = u.monthly || [];
       ytdRunKm[u.id] = ytdMonthly
         .filter(m => m.year === currentYear)
@@ -2150,10 +2154,10 @@ function setWeek(btn, p) {
   btn.classList.add('active');
   // Synthetic periods (month-N, qN) are computed from ytd data — no backend fetch needed
   if (p.startsWith('month-') || p.startsWith('q')) {
-    if (dataCache['ytd']) {
-      applyData(dataCache['ytd'], p, true);
+    if (dataCache['ytd'] && dataCache['ytd'].data) {
+      applyData(dataCache['ytd'].data, p, true);
     } else {
-      loadData('ytd').then(() => applyData(dataCache['ytd'], p, true));
+      loadData('ytd').then(() => applyData(dataCache['ytd'].data, p, true));
     }
   } else {
     loadData(p);
