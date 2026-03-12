@@ -1798,7 +1798,7 @@ function renderLB(){
     { key:'convKm',      label:'Points',         fmt: u => userPointsKm(u).toFixed(1),                         unit:'km' },
     { key:'km',          label:'Original',        fmt: u => fmtKm((u.runKm||0)+(u.cycleKm||0)+(u.virtualKm||0)+(u.swimKm||0)+(u.walkKm||0)), unit:'km' },
     { key:'durationSec', label:'⏱ Time',          fmt: u => fmtDuration(userDurationSec(u)),                    unit:'' },
-    { key:'goalDay',     label:'🎯 Days to Goal', fmt: u => { const d=userDaysToGoal(u); return d!=null ? `Day ${d}` : '—'; }, unit:'' },
+    { key:'goalDay',     label:'🎯 Days to Goal', fmt: u => { const d=userDaysToGoal(u); return d!=null ? `${d}` : '—'; }, unit:'' },
     { key:'workouts',    label:'Sessions',        fmt: u => u.workouts||0,                                       unit:'' },
     { key:'runKm',       label:'🏃 Run',          fmt: u => fmtKm(u.runKm),                                     unit:'km' },
     { key:'cycleKm',     label:'🚴 Bike',         fmt: u => fmtKm(u.cycleKm),                                   unit:'km' },
