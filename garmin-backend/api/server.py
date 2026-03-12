@@ -976,6 +976,26 @@ def api_refresh():
     return jsonify({"status": "refresh started"})
 
 
+@app.get("/api/admin/clear-cache")
+def api_clear_cache():
+    """Clear all cached periods and trigger a fresh background refresh."""
+    from api.cache import _connect
+    try:
+        with _connect() as conn:
+            conn.execute("DELETE FROM team_cache")
+            conn.commit()
+        log.info("Cache cleared via /api/admin/clear-cache")
+    except Exception as exc:
+        log.error("Cache clear failed: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+    threading.Thread(
+        target=refresh_all_periods,
+        args=(load_team,),
+        daemon=True,
+    ).start()
+    return jsonify({"status": "cache cleared, refresh started"})
+
+
 @app.get("/api/cache-status")
 def api_cache_status():
     """Show cache freshness and recent refresh log."""
