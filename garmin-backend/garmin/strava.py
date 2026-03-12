@@ -226,9 +226,11 @@ def fetch_and_normalise(user_id: int, after: date, before: date | None = None) -
     def _enrich(act: dict[str, Any]) -> dict[str, Any]:
         try:
             detail = fetch_activity_detail(act["id"], access_token)
-            act = {**act, "calories": int(detail.get("calories") or 0)}
-        except Exception:
-            pass  # fall back to 0 if detail fetch fails
+            cal = int(detail.get("calories") or 0)
+            log.debug("Activity %s (%s): calories=%s", act["id"], act.get("name"), cal)
+            act = {**act, "calories": cal}
+        except Exception as e:
+            log.warning("Failed to fetch detail for activity %s: %s", act["id"], e)
         return normalise_activity(act)
 
     results: dict[int, dict] = {}
