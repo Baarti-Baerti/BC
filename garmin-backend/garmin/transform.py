@@ -196,7 +196,7 @@ def _challenge_km(activities: list[dict[str, Any]]) -> float:
       - Cycling:        1:5  (5 km bike = 1 km running)
       - VirtualCycling: 1:4  (4 km indoor bike = 1 km running)
       - Swimming:       4:1  (1 km swim = 4 km running)
-      - Walking:        1:3  only if duration > 30 min AND avg speed > 6.5 km/h (3 km walking = 1 km running)
+      - Walking:        1:1  only if duration > 30 min AND avg speed > 6.5 km/h
     """
     total = 0.0
     for a in activities:
@@ -214,7 +214,7 @@ def _challenge_km(activities: list[dict[str, Any]]) -> float:
             dur_min = a["duration_s"] / 60.0
             speed_kmh = (km / (a["duration_s"] / 3600.0)) if a["duration_s"] > 0 else 0
             if dur_min > 30 and speed_kmh > 6.5:
-                total += km / 3.0
+                total += km
     return round(total, 2)
 
 
@@ -233,6 +233,7 @@ def build_month_summary(
     sess       = len(norms)
     km         = _km(sum(a["distance_m"] for a in norms))
     actKcal    = sum(a["active_kcal"] for a in norms)
+    durationSec = round(sum(a["duration_s"] for a in norms))
     split      = _split_km(norms)
     runKm      = split["runKm"]
     cycleKm    = split["cycleKm"]
@@ -241,8 +242,19 @@ def build_month_summary(
     walkKm     = split["walkKm"]
     challengeKm = _challenge_km(norms)
 
-    # Build 28-day array (we cap at 28 for display uniformity)
+    # Compute day-of-month when cumulative challengeKm first crossed the goal (66.67)
+    GOAL = 66.67
+    goal_day: int | None = None
     _, last_day = calendar.monthrange(year, month)
+    cumulative = 0.0
+    for day_num in range(1, last_day + 1):
+        d = date(year, month, day_num).isoformat()
+        day_acts = [a for a in norms if a["date"] == d]
+        cumulative += _challenge_km(day_acts)
+        if goal_day is None and cumulative >= GOAL:
+            goal_day = day_num
+
+    # Build 28-day array (we cap at 28 for display uniformity)
     days: list[int] = []
     for day_num in range(1, 29):
         if day_num > last_day:
@@ -264,6 +276,8 @@ def build_month_summary(
         "swimKm":       swimKm,
         "walkKm":       walkKm,
         "challengeKm":  challengeKm,
+        "durationSec":  durationSec,
+        "goalDay":      goal_day,
         "actKcal":      actKcal,
         "bmi":          round(bmi, 1) if bmi else None,
         "days":         days,
@@ -335,6 +349,7 @@ def build_user_payload(
         "calories":     week["calories"],
         "workouts":     len(range_acts),
         "km":           round(sum(a["distance_m"] for a in range_acts) / 1000, 1),
+        "durationSec":  round(sum(a["duration_s"] for a in range_acts)),
         "runKm":        range_split["runKm"],
         "cycleKm":      range_split["cycleKm"],
         "virtualKm":    range_split["virtualKm"],
@@ -342,7 +357,6 @@ def build_user_payload(
         "skiKm":        range_split["skiKm"],
         "walkKm":       range_split["walkKm"],
         "otherKm":      range_split["otherKm"],
-        "challengeKm":  _challenge_km(range_acts),
         "actKcal":      week["actKcal"],
         "steps":        steps,
         "bmi":          round(bmi, 1) if bmi else 0.0,
