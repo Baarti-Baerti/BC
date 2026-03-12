@@ -2101,16 +2101,15 @@ function renderPoints(){
     return map;
   }
 
-  // Rule A: +1pt for each completed past month this year where challengeKm >= GOAL
-  // Current month is NOT counted (still in progress)
+  // Rule A: +1pt for each month this year (including current) where challengeKm >= GOAL
   const ruleAPoints = {};
-  const ruleAData = {}; // { userId: { month: challengeKm } } for all past months
+  const ruleAData = {}; // { userId: { month: challengeKm } } for all months up to current
 
   users.forEach(u => {
     const runMap = monthlyRunMap(u);
     let pts = 0;
     const data = {};
-    for (let m = 1; m < currentMonth; m++) {
+    for (let m = 1; m <= currentMonth; m++) {
       const km = runMap[m] || 0;
       data[m] = km;
       if (km >= GOAL) pts++;
@@ -2199,7 +2198,7 @@ function renderPoints(){
       return `<th style="${style}" title="${MONTH_NAMES[m-1]} ${currentYear}${isCurrent?' (in progress)':!isPast?' (upcoming)':''}">${MONTH_NAMES[m-1]}</th>`;
     }).join('')}
     <th style="border-left:2px solid var(--border);color:var(--text2)" title="Total equivalent km this year">Total km</th>
-    <th style="color:#818cf8;border-left:2px solid var(--border)" title="Rule A: +1pt per month ≥${GOAL}km">A</th>
+    <th style="color:#818cf8;border-left:2px solid var(--border)" title="Rule A: +1pt per month ≥${GOAL}km (including current month)">A</th>
     <th style="color:#34d399" title="Rule B: most YTD run km (+2pts)">B</th>
     <th style="color:#f472b6" title="Rule C: most Rule A points (+2pts)">C</th>
     <th style="color:#fb923c" title="Rule D: biggest BMI improvement Jan→latest month (+1pt)">D</th>
