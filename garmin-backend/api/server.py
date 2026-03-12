@@ -196,7 +196,7 @@ def _build_month_from_normalised(acts: list[dict], year: int, month: int) -> dic
     cal     = sum(a["calories"]    for a in acts)
     sess    = len(acts)
     km      = _km(sum(a["distance_m"] for a in acts))
-    actKcal = sum(a["active_kcal"] for a in acts)
+    actKcal = sum(a["calories"] for a in acts)  # Strava: use total calories (no active_kcal distinction)
     durSec  = round(sum(a["duration_s"] for a in acts))
     split   = _split_km(acts)
     challengeKm = _challenge_km(acts)
@@ -220,7 +220,7 @@ def _build_month_from_normalised(acts: list[dict], year: int, month: int) -> dic
             continue
         d = date(year, month, day_num).isoformat()
         day_acts = [a for a in acts if a["date"] == d]
-        days.append(sum(a["active_kcal"] for a in day_acts))
+        days.append(sum(a["calories"] for a in day_acts))  # Strava: use total calories
 
     return {
         "year":        year,
@@ -259,7 +259,7 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
         week_start = today - timedelta(days=6)
         week_dates = [(week_start + timedelta(days=i)).isoformat() for i in range(7)]
         day_flags = [1 if any(a["date"] == d for a in period_acts) else 0 for d in week_dates]
-        day_cals  = [sum(a["active_kcal"] for a in period_acts if a["date"] == d) for d in week_dates]
+        day_cals  = [sum(a["calories"] for a in period_acts if a["date"] == d) for d in week_dates]
 
         from garmin.transform import _km, _split_km, _km_by_type, _challenge_km
         split = _split_km(period_acts)
@@ -268,7 +268,7 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
             "calories":     sum(a["calories"]   for a in period_acts),
             "workouts":     len(period_acts),
             "km":           _km(sum(a["distance_m"] for a in period_acts)),
-            "actKcal":      sum(a["active_kcal"] for a in period_acts),
+            "actKcal":      sum(a["calories"] for a in period_acts),  # Strava: use total calories
             "week":         day_flags,
             "weekCalories": day_cals,
             "kmByType":     _km_by_type(period_acts),
