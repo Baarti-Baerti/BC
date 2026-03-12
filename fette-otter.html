@@ -1836,8 +1836,12 @@ function renderLB(){
         ? userPointsKm(u)
         : c.key === 'km'
         ? (u.runKm||0) + (u.cycleKm||0) + (u.virtualKm||0) + (u.swimKm||0) + (u.walkKm||0)
+        : c.key === 'durationSec'
+        ? userDurationSec(u)
+        : c.key === 'goalDay'
+        ? (userDaysToGoal(u) ?? 0)
         : u[c.key]||0;
-      const isZero = raw === 0;
+      const isZero = c.key === 'goalDay' ? userDaysToGoal(u) == null : raw === 0;
       const isSort = c.key === curMetric;
       const cls = isZero ? 'lb-zero' : isSort ? 'lb-sort-col' : '';
       let title = '';
