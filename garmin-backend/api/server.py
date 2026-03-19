@@ -446,13 +446,26 @@ def health():
     from pathlib import Path
     squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
     members = g.all_members()
+    member_details = []
+    for m in members:
+        uid = m["id"]
+        udir = squad_home / str(uid)
+        files = [f.name for f in udir.iterdir()] if udir.exists() else []
+        member_details.append({
+            "id": uid,
+            "name": m["name"],
+            "provider": m.get("provider", "garmin"),
+            "authenticated": g.is_authenticated(uid),
+            "token_dir_exists": udir.exists(),
+            "token_files": files,
+        })
     debug = {
         "status": "ok",
         "team_size": len(members),
         "squad_home": str(squad_home),
         "squad_home_exists": squad_home.exists(),
         "squad_home_contents": [str(p) for p in squad_home.iterdir()] if squad_home.exists() else [],
-        "members": [{"id": m["id"], "name": m["name"], "authenticated": g.is_authenticated(m["id"])} for m in members],
+        "members": member_details,
     }
     return jsonify(debug)
 
