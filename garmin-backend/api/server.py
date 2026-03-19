@@ -1010,26 +1010,24 @@ def load_team(period: str) -> list[dict]:
     return results
 
 
-CACHE_MAX_AGE_SECONDS = 15 * 60  # 15 minutes
+CACHE_MAX_AGE_SECONDS = 15 * 60  # used only for X-Cache-Age header info
 
 @app.get("/api/team")
 def get_team():
     period = request.args.get("range", "thismonth")
 
-    # Serve from cache if available and fresh
+    # Always serve from cache if data exists — freshness is handled by background refresh
     cached, fetched_at = get_cached(period)
     if cached:
         age = cache_age_seconds(fetched_at)
-        if age is not None and age < CACHE_MAX_AGE_SECONDS:
-            resp = jsonify(cached)
-            resp.headers["X-Cache"] = "HIT"
-            resp.headers["X-Cache-Age"] = str(int(age))
-            resp.headers["X-Cache-Fetched"] = fetched_at or ""
-            return resp
-        log.info("Cache stale for period=%s (age=%ds) — fetching live", period, int(age or 0))
+        resp = jsonify(cached)
+        resp.headers["X-Cache"] = "HIT"
+        resp.headers["X-Cache-Age"] = str(int(age)) if age is not None else "unknown"
+        resp.headers["X-Cache-Fetched"] = fetched_at or ""
+        return resp
 
-    # Cache miss — fetch live and populate cache
-    log.info("Cache miss for period=%s — fetching live", period)
+    # Cache is empty (first ever run) — fetch live and populate
+    log.info("Cache empty for period=%s — fetching live", period)
     results = load_team(period)
     if results and period in CACHED_PERIODS:
         set_cached(period, results)
