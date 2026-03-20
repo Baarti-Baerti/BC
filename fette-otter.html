@@ -1688,8 +1688,12 @@ async function loadData(period = 'thismonth') {
     const entry = dataCache[period] || dataCache['thismonth'];
     applyData(entry ? entry.data : [], period, true);
 
-    // Trigger a background refresh and show toast when new data arrives
-    _triggerBackgroundRefresh(_refreshStartFetchedAt);
+    // Only trigger background refresh if data is older than 30 minutes
+    const cacheTs = _refreshStartFetchedAt ? new Date(_refreshStartFetchedAt).getTime() : 0;
+    const dataAgeMs = Date.now() - cacheTs;
+    if (dataAgeMs > 30 * 60 * 1000) {
+      _triggerBackgroundRefresh(_refreshStartFetchedAt);
+    }
 
   } catch(e) {
     console.error('Backend error:', e);
