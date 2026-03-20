@@ -1116,6 +1116,24 @@ def api_refresh_status():
 
 
 
+@app.get("/api/admin/cache-inspect")
+def api_cache_inspect():
+    """Show raw cache DB contents — row count and fetched_at per period."""
+    from api.cache import _connect
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT period, fetched_at, version, length(payload) as payload_bytes FROM team_cache"
+            ).fetchall()
+        return jsonify({
+            "row_count": len(rows),
+            "entries": [dict(r) for r in rows],
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/cache-status")
 def api_cache_status():
     """Show cache freshness and recent refresh log."""
     status = {}
