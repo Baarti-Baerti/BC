@@ -26,7 +26,7 @@ from garmin import strava as sv
 from api.cache import (
     init_db, get_cached, set_cached, cache_age_seconds,
     refresh_all_periods, start_scheduler, last_refresh_log,
-    CACHED_PERIODS,
+    CACHED_PERIODS, get_setting, set_setting,
 )
 
 logging.basicConfig(
@@ -111,15 +111,18 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     return payload
 
 
-# ── Garmin API pause flag — set to True to block all Garmin calls ─────────────
-# Toggle via GET /api/admin/garmin-pause and /api/admin/garmin-resume
-GARMIN_PAUSED = False
+# ── Garmin API pause flag — persisted in SQLite so it survives restarts ───────
+def is_garmin_paused() -> bool:
+    return get_setting("garmin_paused", "false") == "true"
+
+def set_garmin_paused(paused: bool) -> None:
+    set_setting("garmin_paused", "true" if paused else "false")
 
 def load_user_data(member: dict[str, Any], range_start: date, range_end: date) -> dict[str, Any] | None:
     """Route to correct fetcher based on provider field."""
     if member.get("provider") == "strava":
         return load_strava_user_data(member, range_start, range_end)
-    if GARMIN_PAUSED:
+    if is_garmin_paused():
         log.info("Garmin API paused — skipping fetch for user %s", member["id"])
         return None
     return load_garmin_user_data(member, range_start, range_end)
@@ -1073,8 +1076,7 @@ def api_refresh():
 @app.get("/api/admin/garmin-pause")
 def api_garmin_pause():
     """Block all Garmin API calls — dashboard still serves cached data."""
-    global GARMIN_PAUSED
-    GARMIN_PAUSED = True
+    set_garmin_paused(True)
     log.info("Garmin API calls PAUSED via admin endpoint")
     return jsonify({"status": "paused", "garmin_paused": True})
 
@@ -1082,8 +1084,7 @@ def api_garmin_pause():
 @app.get("/api/admin/garmin-resume")
 def api_garmin_resume():
     """Re-enable Garmin API calls."""
-    global GARMIN_PAUSED
-    GARMIN_PAUSED = False
+    set_garmin_paused(False)
     log.info("Garmin API calls RESUMED via admin endpoint")
     return jsonify({"status": "resumed", "garmin_paused": False})
 
@@ -1091,7 +1092,7 @@ def api_garmin_resume():
 @app.get("/api/admin/garmin-paused")
 def api_garmin_paused():
     """Check whether Garmin API calls are currently paused."""
-    return jsonify({"garmin_paused": GARMIN_PAUSED})
+    return jsonify({"garmin_paused": is_garmin_paused()})
 
 
 
