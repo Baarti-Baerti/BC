@@ -369,6 +369,20 @@
     </table>
   </div>
 
+  <!-- Garmin Debug -->
+  <div class="section-title">Garmin API Test <span style="color:var(--red);font-size:0.6rem;margin-left:8px">⚠ MAKES LIVE GARMIN API CALL</span></div>
+  <div style="font-size:0.72rem;color:var(--muted);margin-bottom:12px">
+    Only click when checking if the rate limit has lifted. Do NOT auto-refresh this section.
+  </div>
+  <div class="actions" style="margin-bottom:14px">
+    <button class="btn btn-red" onclick="testGarminDebug()">⚡ Test Garmin API (user 1)</button>
+  </div>
+  <div class="surface-wrap" id="garminDebugWrap" style="display:none">
+    <div style="padding:16px 20px">
+      <div id="garminDebugResult" style="font-size:0.75rem;white-space:pre-wrap;color:var(--text);line-height:1.6"></div>
+    </div>
+  </div>
+
   <!-- Refresh log -->
   <div class="section-title">Recent Refresh Log</div>
   <div class="surface-wrap">
@@ -632,6 +646,33 @@ async function triggerRefresh() {
     showToast(`↻ Refresh ${data.status} — poll /api/team/refresh-status for completion`, 5000);
   } catch(e) { showToast('❌ Failed to trigger refresh'); }
   document.getElementById('btnRefresh').disabled = false;
+}
+
+async function testGarminDebug() {
+  const wrap = document.getElementById('garminDebugWrap');
+  const result = document.getElementById('garminDebugResult');
+  wrap.style.display = 'block';
+  result.style.color = 'var(--muted)';
+  result.textContent = '⟳ Calling /api/debug/1 — this hits Garmin API…';
+  try {
+    const r = await fetch(`${API_BASE}/api/debug/1`);
+    const data = await r.json();
+    const is429 = JSON.stringify(data).includes('429') || JSON.stringify(data).includes('Too Many Requests');
+    result.style.color = is429 ? 'var(--red)' : 'var(--green)';
+    if (is429) {
+      result.textContent = '❌ Still rate limited (429 Too Many Requests)\n\n' + JSON.stringify(data, null, 2);
+    } else if (data.error) {
+      result.style.color = 'var(--red)';
+      result.textContent = '❌ Error: ' + JSON.stringify(data, null, 2);
+    } else {
+      result.textContent = '✅ Garmin API responding!\n\nUser: ' + data.member +
+        '\nUsername: ' + data.username +
+        '\n\nFull response:\n' + JSON.stringify(data, null, 2);
+    }
+  } catch(e) {
+    result.style.color = 'var(--red)';
+    result.textContent = '❌ Request failed: ' + e.message;
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
