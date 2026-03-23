@@ -401,10 +401,10 @@ const MAIN_PAGE = 'https://baarti-baerti.github.io/Fette-Otter/fette-otter.html'
 // ── Auth check ────────────────────────────────────────────────────────────────
 function checkAccess() {
   let member = null;
-  try { member = JSON.parse(localStorage.getItem('fette_otter_member') || 'null'); } catch(e) {}
+  try { member = JSON.parse(localStorage.getItem('squad_member') || 'null'); } catch(e) {}
   if (!member) {
     // Not logged in — try sessionStorage too
-    try { member = JSON.parse(sessionStorage.getItem('fette_otter_member') || 'null'); } catch(e) {}
+    try { member = JSON.parse(sessionStorage.getItem('squad_member') || 'null'); } catch(e) {}
   }
   const isAdmin = member?.name === 'Martin';
   if (!isAdmin) {
