@@ -319,6 +319,20 @@
 
   </div>
 
+  <!-- Garmin API Test -->
+  <div class="section-title">Garmin API Test <span style="color:var(--red);font-size:0.6rem;margin-left:8px">⚠ MAKES LIVE GARMIN API CALL</span></div>
+  <div style="font-size:0.72rem;color:var(--muted);margin-bottom:12px">
+    Only click when checking if the rate limit has lifted. Do NOT auto-refresh this section.
+  </div>
+  <div class="actions" style="margin-bottom:14px">
+    <button class="btn btn-red" onclick="testGarminDebug()">⚡ Test Garmin API (user 1)</button>
+  </div>
+  <div class="surface-wrap" id="garminDebugWrap" style="display:none">
+    <div style="padding:16px 20px">
+      <div id="garminDebugResult" style="font-size:0.75rem;white-space:pre-wrap;color:var(--text);line-height:1.6"></div>
+    </div>
+  </div>
+
   <!-- Actions -->
   <div class="section-title">Actions</div>
   <div class="actions">
@@ -369,22 +383,8 @@
     </table>
   </div>
 
-  <!-- Garmin Debug -->
-  <div class="section-title">Garmin API Test <span style="color:var(--red);font-size:0.6rem;margin-left:8px">⚠ MAKES LIVE GARMIN API CALL</span></div>
-  <div style="font-size:0.72rem;color:var(--muted);margin-bottom:12px">
-    Only click when checking if the rate limit has lifted. Do NOT auto-refresh this section.
-  </div>
-  <div class="actions" style="margin-bottom:14px">
-    <button class="btn btn-red" onclick="testGarminDebug()">⚡ Test Garmin API (user 1)</button>
-  </div>
-  <div class="surface-wrap" id="garminDebugWrap" style="display:none">
-    <div style="padding:16px 20px">
-      <div id="garminDebugResult" style="font-size:0.75rem;white-space:pre-wrap;color:var(--text);line-height:1.6"></div>
-    </div>
-  </div>
-
-  <!-- Refresh log -->
-  <div class="section-title">Recent Refresh Log</div>
+  <!-- Actions -->
+  <div class="section-title">Actions</div>
   <div class="surface-wrap">
     <table class="cache-table">
       <thead>
