@@ -1077,6 +1077,7 @@ def api_refresh():
 def api_garmin_pause():
     """Block all Garmin API calls — dashboard still serves cached data."""
     set_garmin_paused(True)
+    set_setting("garmin_paused_since", datetime.now(timezone.utc).isoformat())
     log.info("Garmin API calls PAUSED via admin endpoint")
     return jsonify({"status": "paused", "garmin_paused": True})
 
@@ -1085,6 +1086,7 @@ def api_garmin_pause():
 def api_garmin_resume():
     """Re-enable Garmin API calls."""
     set_garmin_paused(False)
+    set_setting("garmin_paused_since", "")
     log.info("Garmin API calls RESUMED via admin endpoint")
     return jsonify({"status": "resumed", "garmin_paused": False})
 
@@ -1092,7 +1094,9 @@ def api_garmin_resume():
 @app.get("/api/admin/garmin-paused")
 def api_garmin_paused():
     """Check whether Garmin API calls are currently paused."""
-    return jsonify({"garmin_paused": is_garmin_paused()})
+    paused = is_garmin_paused()
+    since  = get_setting("garmin_paused_since", "") if paused else ""
+    return jsonify({"garmin_paused": paused, "paused_since": since})
 
 
 
