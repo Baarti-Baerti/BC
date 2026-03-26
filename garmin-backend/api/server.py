@@ -1008,7 +1008,8 @@ def load_team(period: str) -> list[dict]:
         payload["picture"]      = m.get("picture", "")
         payload["google_email"] = m.get("google_email", "")
         results_map[m["id"]] = payload
-        time.sleep(1)  # 1s gap between Garmin users
+        if not is_garmin_paused():
+            time.sleep(1)  # 1s gap between Garmin users to avoid rate limiting
 
     # Fetch Strava users in parallel
     with ThreadPoolExecutor(max_workers=len(strava_members) or 1) as pool:
@@ -1051,9 +1052,9 @@ def get_team():
     # Cache is empty (first ever run) — fetch live and populate
     log.info("Cache empty for period=%s — fetching live", period)
     results = load_team(period)
-    if results and period in CACHED_PERIODS:
+    if results is not None and period in CACHED_PERIODS:
         set_cached(period, results)
-    resp = jsonify(results)
+    resp = jsonify(results or [])
     resp.headers["X-Cache"] = "MISS"
     return resp
 
@@ -1099,7 +1100,22 @@ def api_garmin_paused():
     return jsonify({"garmin_paused": paused, "paused_since": since})
 
 
+@app.get("/api/admin/force-cache")
+def api_force_cache():
+    """Force a synchronous team fetch and write to cache — bypasses all guards."""
+    results = {}
+    for period in CACHED_PERIODS:
+        try:
+            data = load_team(period)
+            set_cached(period, data)
+            live = sum(1 for u in data if not u.get("_stub"))
+            results[period] = {"users": len(data), "live": live, "status": "ok"}
+        except Exception as exc:
+            results[period] = {"status": "error", "error": str(exc)}
+    return jsonify(results)
 
+
+@app.get("/api/admin/clear-cache")
 def api_clear_cache():
     """Clear all cached periods and trigger a fresh background refresh."""
     from api.cache import _connect
