@@ -87,39 +87,11 @@ def init_db() -> None:
     log.info("Cache DB initialised at %s", _db_path())
 
 
-def get_setting(key: str, default: str = "") -> str:
-    """Read a persistent setting from the DB."""
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?", (key,)
-            ).fetchone()
-        return row["value"] if row else default
-    except Exception as exc:
-        log.warning("get_setting failed for %s: %s", key, exc)
-        return default
-
-
-def set_setting(key: str, value: str) -> None:
-    """Write a persistent setting to the DB."""
-    try:
-        with _connect() as conn:
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, value)
-            )
-            conn.commit()
-    except Exception as exc:
-        log.warning("set_setting failed for %s: %s", key, exc)
-
-
 # ── read / write ──────────────────────────────────────────────────────────────
 
 def get_cached(period: str) -> tuple[list[dict], str | None]:
     """
-    Return (payload_list, fetched_at_iso) from cache, or ([], None) if empty.
-    Version mismatch returns the data anyway — better stale than empty.
+    Return (payload_list, fetched_at_iso) from cache, or ([], None) if empty or stale version.
     """
     try:
         with _connect() as conn:
@@ -127,7 +99,7 @@ def get_cached(period: str) -> tuple[list[dict], str | None]:
                 "SELECT payload, fetched_at, version FROM team_cache WHERE period = ?",
                 (period,)
             ).fetchone()
-        if row:
+        if row and row["version"] == CACHE_VERSION:
             return json.loads(row["payload"]), row["fetched_at"]
     except Exception as exc:
         log.warning("Cache read failed for %s: %s", period, exc)
@@ -185,15 +157,10 @@ def refresh_all_periods(load_team_fn) -> None:
             started = datetime.now(timezone.utc).isoformat()
             try:
                 data = load_team_fn(period)
-                live_count = sum(1 for u in data if not u.get("_stub"))
-                if data:  # Always write if we have any users at all
-                    set_cached(period, data)
-                    status = "ok"
-                    log.info("Refreshed period=%s — %d users (%d live)", period, len(data), live_count)
-                else:
-                    status = "skipped"
-                    log.warning("Refresh period=%s skipped — empty result, keeping existing cache", period)
-                error = None
+                set_cached(period, data)
+                status = "ok"
+                error  = None
+                log.info("Refreshed period=%s — %d users", period, len(data))
             except Exception as exc:
                 status = "error"
                 error  = str(exc)
@@ -258,3 +225,30 @@ def last_refresh_log(limit: int = 10) -> list[dict]:
         return [dict(r) for r in rows]
     except Exception:
         return []
+
+
+def get_setting(key: str, default: str = "") -> str:
+    """Read a persistent setting from the DB."""
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row else default
+    except Exception as exc:
+        log.warning("get_setting failed for %s: %s", key, exc)
+        return default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Write a persistent setting to the DB."""
+    try:
+        with _connect() as conn:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value)
+            )
+            conn.commit()
+    except Exception as exc:
+        log.warning("set_setting failed for %s: %s", key, exc)

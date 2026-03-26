@@ -34,9 +34,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-# ── Background refresh state ──────────────────────────────────────────────────
+# ── Garmin pause + refresh state ──────────────────────────────────────────────
 _refresh_lock        = threading.Lock()
-_refresh_in_progress = {}  # { active, id, started_at, completed, finished_at }
+_refresh_in_progress = {}
+
+def is_garmin_paused() -> bool:
+    return get_setting("garmin_paused", "false") == "true"
+
+def set_garmin_paused(paused: bool) -> None:
+    set_setting("garmin_paused", "true" if paused else "false")
 log = logging.getLogger("squad_stats")
 
 # ── Token bootstrap (cloud deployments) ──────────────────────────────────────
@@ -111,13 +117,6 @@ def verify_google_id_token(id_token: str) -> dict[str, Any]:
     return payload
 
 
-# ── Garmin API pause flag — persisted in SQLite so it survives restarts ───────
-def is_garmin_paused() -> bool:
-    return get_setting("garmin_paused", "false") == "true"
-
-def set_garmin_paused(paused: bool) -> None:
-    set_setting("garmin_paused", "true" if paused else "false")
-
 def load_user_data(member: dict[str, Any], range_start: date, range_end: date) -> dict[str, Any] | None:
     """Route to correct fetcher based on provider field."""
     if member.get("provider") == "strava":
@@ -128,89 +127,59 @@ def load_user_data(member: dict[str, Any], range_start: date, range_end: date) -
     return load_garmin_user_data(member, range_start, range_end)
 
 
-def _garmin_retry(fn, max_retries: int = 3, base_delay: float = 10.0):
-    """
-    Call fn(), retrying on 429 rate-limit errors.
-    Respects the Retry-After header if present, otherwise uses exponential backoff.
-    Delays: Retry-After value, or 10s → 20s → 40s between attempts.
-    """
-    import time
-    for attempt in range(max_retries):
-        try:
-            return fn()
-        except Exception as exc:
-            is_429 = "429" in str(exc) or "Too Many Requests" in str(exc)
-            if is_429 and attempt < max_retries - 1:
-                # Try to extract Retry-After from the exception/response
-                retry_after = None
-                try:
-                    # GarthHTTPError and requests HTTPError both expose .response
-                    response = getattr(exc, 'response', None)
-                    if response is not None:
-                        header_val = response.headers.get('Retry-After')
-                        if header_val:
-                            retry_after = float(header_val)
-                            log.info("Garmin Retry-After header: %.0fs", retry_after)
-                except Exception:
-                    pass
-                delay = (retry_after + 10) if retry_after is not None else base_delay * (2 ** attempt)
-                log.warning("Garmin 429 rate limit — waiting %.0fs before retry %d/%d",
-                            delay, attempt + 1, max_retries - 1)
-                time.sleep(delay)
-            else:
-                raise
-
-
 def load_garmin_user_data(member: dict[str, Any], range_start: date, range_end: date) -> dict[str, Any] | None:
     uid = member["id"]
     try:
-        client = _garmin_retry(lambda: g.get_client(uid))
+        client = g.get_client(uid)
     except GarthException as exc:
         log.warning("User %s unauthenticated: %s", uid, exc)
-        return None
-    except Exception as exc:
-        log.warning("User %s get_client failed after retries: %s", uid, exc)
         return None
 
     range_days = (range_end - range_start).days + 1
     today = date.today()
 
     try:
-        week_acts      = _garmin_retry(lambda: g.fetch_activities(client, range_start, range_end))
-        week_summaries = _garmin_retry(lambda: g.fetch_daily_summaries(client, range_start, range_days))
-        height_m       = member.get("height_m") or _garmin_retry(lambda: g.fetch_user_height(client)) or None
-        bmi            = _garmin_retry(lambda: g.fetch_latest_bmi(client, height_m_override=height_m))
-        steps          = _garmin_retry(lambda: g.fetch_steps_range(client, range_start, range_end))
+        week_acts      = g.fetch_activities(client, range_start, range_end)
+        week_summaries = g.fetch_daily_summaries(client, range_start, range_days)
+        # Height: prefer manually stored value in roster, fall back to Garmin profile
+        height_m = member.get("height_m") or g.fetch_user_height(client) or None
+        bmi            = g.fetch_latest_bmi(client, height_m_override=height_m)
+        steps          = g.fetch_steps_range(client, range_start, range_end)
 
         # Fetch and cache profile picture if not already stored
         if not member.get("picture"):
-            try:
-                pic = _garmin_retry(lambda: g.fetch_profile_picture(client))
-                if pic:
-                    g.update_member(uid, {"picture": pic})
-                    member = g.get_member(uid)
-            except Exception:
-                pass
+            pic = g.fetch_profile_picture(client)
+            if pic:
+                g.update_member(uid, {"picture": pic})
+                member = g.get_member(uid)  # refresh
 
-        # Fetch Jan through current month — sequential to avoid hammering Garmin
+        # Fetch Jan through current month of the current year
         months_to_fetch = [(today.year, mo) for mo in range(1, today.month + 1)]
+        # Include last month if range covers it and it's in a prior year (edge case)
         if range_start.year == today.year and range_start.month not in [m for _, m in months_to_fetch]:
             months_to_fetch.insert(0, (range_start.year, range_start.month))
 
         monthly_acts: dict[str, list] = {}
         monthly_bmis: dict[str, Any] = {}
 
-        for yr, mo in months_to_fetch:
-            key = f"{yr}-{mo:02d}"
-            try:
-                acts   = _garmin_retry(lambda yr=yr, mo=mo: g.fetch_activities_for_month(client, yr, mo))
-                mo_bmi = _garmin_retry(lambda yr=yr, mo=mo: g.fetch_bmi_for_month(client, yr, mo, height_m_override=height_m))
-                monthly_acts[key] = acts
-                monthly_bmis[key] = mo_bmi if mo_bmi is not None else bmi
-            except Exception as exc:
-                log.warning("Month fetch failed %s for user %s: %s", key, uid, exc)
-                monthly_acts[key] = []
-                monthly_bmis[key] = bmi
+        def _fetch_month(yr, mo):
+            key      = f"{yr}-{mo:02d}"
+            acts     = g.fetch_activities_for_month(client, yr, mo)
+            mo_bmi   = g.fetch_bmi_for_month(client, yr, mo, height_m_override=height_m)
+            return key, acts, mo_bmi if mo_bmi is not None else bmi
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(_fetch_month, yr, mo): (yr, mo)
+                       for yr, mo in months_to_fetch}
+            for fut in as_completed(futures):
+                try:
+                    key, acts, m_bmi = fut.result()
+                    monthly_acts[key] = acts
+                    monthly_bmis[key] = m_bmi
+                except Exception as exc:
+                    yr, mo = futures[fut]
+                    monthly_acts[f"{yr}-{mo:02d}"] = []
+                    monthly_bmis[f"{yr}-{mo:02d}"] = bmi
 
         return g.build_user_payload(
             roster_entry=member,
@@ -231,21 +200,16 @@ def load_garmin_user_data(member: dict[str, Any], range_start: date, range_end: 
 
 def _build_month_from_normalised(acts: list[dict], year: int, month: int) -> dict:
     """Like build_month_summary but for already-normalised activity dicts (Strava)."""
-    from garmin.transform import _km, _split_km, _challenge_km
-    # Reuse build_month_summary by passing already-normalised acts as raw
-    # (build_month_summary calls _normalise_activity internally, but since acts
-    # are already normalised we wrap them to pass through unchanged)
-    # Simplest: just replicate the logic directly using the shared helpers
     import calendar as cal_mod
+    from garmin.transform import _km, _split_km, _challenge_km
     cal     = sum(a["calories"]    for a in acts)
     sess    = len(acts)
     km      = _km(sum(a["distance_m"] for a in acts))
-    actKcal = sum(a["calories"] for a in acts)  # Strava: use total calories (no active_kcal distinction)
+    actKcal = sum(a["calories"] for a in acts)  # Strava: use total calories
     durSec  = round(sum(a["duration_s"] for a in acts))
     split   = _split_km(acts)
     challengeKm = _challenge_km(acts)
 
-    # Day when cumulative challengeKm first crossed the goal
     GOAL = 66.67
     _, last_day = cal_mod.monthrange(year, month)
     goal_day: int | None = None
@@ -264,7 +228,7 @@ def _build_month_from_normalised(acts: list[dict], year: int, month: int) -> dic
             continue
         d = date(year, month, day_num).isoformat()
         day_acts = [a for a in acts if a["date"] == d]
-        days.append(sum(a["calories"] for a in day_acts))  # Strava: use total calories
+        days.append(sum(a["calories"] for a in day_acts))
 
     return {
         "year":        year,
@@ -294,27 +258,10 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
         return None
     try:
         today = date.today()
+        range_days = (range_end - range_start).days + 1
 
-        # Fetch entire YTD without calorie enrichment (fast, no rate limit risk)
-        import calendar as cal_mod
-        ytd_start = date(today.year, 1, 1)
-        _, last_day_cur = cal_mod.monthrange(today.year, today.month)
-        ytd_end = date(today.year, today.month, last_day_cur)
-        all_ytd_acts = sv.fetch_and_normalise(uid, ytd_start, ytd_end, enrich_calories=False)
-
-        # Enrich only current month activities with calories (minimises API calls)
-        cur_month_start = date(today.year, today.month, 1).isoformat()
-        cur_month_end   = ytd_end.isoformat()
-        cur_month_ids   = {a["id"] for a in all_ytd_acts if cur_month_start <= a["date"] <= cur_month_end}
-        if cur_month_ids:
-            enriched_acts = sv.fetch_and_normalise(uid, date(today.year, today.month, 1), ytd_end, enrich_calories=True)
-            enriched_map  = {a["id"]: a for a in enriched_acts}
-            all_ytd_acts  = [enriched_map.get(a["id"], a) for a in all_ytd_acts]
-
-        # Filter to the requested period
-        range_start_iso = range_start.isoformat()
-        range_end_iso   = range_end.isoformat()
-        period_acts = [a for a in all_ytd_acts if range_start_iso <= a["date"] <= range_end_iso]
+        # Fetch current period activities (already normalised)
+        period_acts = sv.fetch_and_normalise(uid, range_start, range_end)
 
         # Build week flags from last 7 days for the activity dots
         week_start = today - timedelta(days=6)
@@ -336,7 +283,19 @@ def load_strava_user_data(member: dict[str, Any], range_start: date, range_end: 
             **split,
         }
 
-        # Monthly data — split the already-fetched YTD activities by month
+        # Fetch entire YTD once, split by month (avoids per-month API calls)
+        import calendar as cal_mod
+        ytd_start = date(today.year, 1, 1)
+        _, last_day_cur = cal_mod.monthrange(today.year, today.month)
+        ytd_end = date(today.year, today.month, last_day_cur)
+        all_ytd_acts = sv.fetch_and_normalise(uid, ytd_start, ytd_end, enrich_calories=False)
+
+        # Enrich only current month with calories to stay within rate limits
+        cur_month_start = date(today.year, today.month, 1)
+        enriched = sv.fetch_and_normalise(uid, cur_month_start, ytd_end, enrich_calories=True)
+        enriched_map = {a["id"]: a for a in enriched}
+        all_ytd_acts = [enriched_map.get(a["id"], a) for a in all_ytd_acts]
+
         months_keys: list[tuple[int, int]] = [
             (today.year, mo) for mo in range(1, today.month + 1)
         ]
@@ -486,26 +445,13 @@ def health():
     from pathlib import Path
     squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
     members = g.all_members()
-    member_details = []
-    for m in members:
-        uid = m["id"]
-        udir = squad_home / str(uid)
-        files = [f.name for f in udir.iterdir()] if udir.exists() else []
-        member_details.append({
-            "id": uid,
-            "name": m["name"],
-            "provider": m.get("provider", "garmin"),
-            "authenticated": g.is_authenticated(uid),
-            "token_dir_exists": udir.exists(),
-            "token_files": files,
-        })
     debug = {
         "status": "ok",
         "team_size": len(members),
         "squad_home": str(squad_home),
         "squad_home_exists": squad_home.exists(),
         "squad_home_contents": [str(p) for p in squad_home.iterdir()] if squad_home.exists() else [],
-        "members": member_details,
+        "members": [{"id": m["id"], "name": m["name"], "authenticated": g.is_authenticated(m["id"])} for m in members],
     }
     return jsonify(debug)
 
@@ -716,42 +662,12 @@ def debug_strava(user_id: int):
         start = today - timedelta(days=30)
         acts = sv.fetch_activities(user_id, start, today)
         results["steps"]["fetch_activities_30d"] = f"OK — {len(acts)} activities"
-        results["sample_activity_summary"] = acts[0] if acts else None
+        results["sample_activity"] = acts[0] if acts else None
         results["activity_types"] = list({
             (a.get("sport_type") or a.get("type", "?")) for a in acts
         })
-        # Step 5: fetch detail for first activity to check calories field
-        if acts:
-            try:
-                access_token = sv.get_access_token(user_id)
-                detail = sv.fetch_activity_detail(acts[0]["id"], access_token)
-                results["steps"]["fetch_activity_detail"] = "OK"
-                results["sample_activity_detail_calories"] = detail.get("calories")
-                results["sample_activity_detail_keys"] = list(detail.keys())
-            except Exception as exc:
-                results["steps"]["fetch_activity_detail"] = f"FAILED: {exc}"
     except Exception as exc:
         results["steps"]["fetch_activities_30d"] = f"FAILED: {exc}"
-
-    # Step 6: test full load_strava_user_data
-    try:
-        member = g.get_member(user_id)
-        today = date.today()
-        import calendar as cal_mod
-        _, last_day = cal_mod.monthrange(today.year, today.month)
-        payload = load_strava_user_data(member, date(today.year, today.month, 1), date(today.year, today.month, last_day))
-        if payload:
-            results["steps"]["load_strava_user_data"] = "OK"
-            results["payload_keys"] = list(payload.keys())
-            results["actKcal"] = payload.get("actKcal")
-            results["challengeKm"] = payload.get("challengeKm")
-            results["monthly_count"] = len(payload.get("monthly", []))
-        else:
-            results["steps"]["load_strava_user_data"] = "FAILED: returned None"
-    except Exception as exc:
-        import traceback
-        results["steps"]["load_strava_user_data"] = f"FAILED: {exc}"
-        results["load_strava_traceback"] = traceback.format_exc()
 
     return jsonify(results)
 
@@ -983,85 +899,51 @@ def debug_user(user_id: int):
 def load_team(period: str) -> list[dict]:
     """
     Fetch live data for all members for the given period.
-    Garmin users are fetched sequentially to avoid rate limiting.
-    Strava users are fetched in parallel (different API, different limits).
+    Used by both the scheduler and as a cache-miss fallback.
     """
-    import time
     members = g.all_members()
-    if not members:
-        _auto_seed_members()
-        members = g.all_members()
     if not members:
         return []
     range_start, range_end = _range_dates(period)
-
-    garmin_members = [m for m in members if m.get("provider", "garmin") != "strava"]
-    strava_members = [m for m in members if m.get("provider") == "strava"]
-
-    results_map: dict[int, dict] = {}
-
-    # Fetch Garmin users sequentially with a small gap between each
-    for m in garmin_members:
-        try:
-            payload = load_garmin_user_data(m, range_start, range_end)
-        except Exception:
-            payload = None
-        if payload is None:
-            payload = _stub(m)
-        payload["picture"]      = m.get("picture", "")
-        payload["google_email"] = m.get("google_email", "")
-        results_map[m["id"]] = payload
-        if not is_garmin_paused():
-            time.sleep(1)  # 1s gap between Garmin users to avoid rate limiting
-
-    # Fetch Strava users in parallel
-    with ThreadPoolExecutor(max_workers=len(strava_members) or 1) as pool:
-        fmap = {pool.submit(load_strava_user_data, m, range_start, range_end): m
-                for m in strava_members}
+    results = []
+    with ThreadPoolExecutor(max_workers=max(len(members), 1)) as pool:
+        fmap = {pool.submit(load_user_data, m, range_start, range_end): m for m in members}
         for fut in as_completed(fmap):
-            m = fmap[fut]
+            member = fmap[fut]
             try:
                 payload = fut.result()
             except Exception:
                 payload = None
             if payload is None:
-                payload = _stub(m)
-            payload["picture"]      = m.get("picture", "")
-            payload["google_email"] = m.get("google_email", "")
-            results_map[m["id"]] = payload
-
-    # Restore original member order
+                payload = _stub(member)
+            payload["picture"]      = member.get("picture", "")
+            payload["google_email"] = member.get("google_email", "")
+            results.append(payload)
     id_order = {m["id"]: i for i, m in enumerate(members)}
-    results = sorted(results_map.values(), key=lambda u: id_order.get(u["id"], 999))
+    results.sort(key=lambda u: id_order.get(u["id"], 999))
     return results
 
-
-CACHE_MAX_AGE_SECONDS = 15 * 60  # used only for X-Cache-Age header info
 
 @app.get("/api/team")
 def get_team():
     period = request.args.get("range", "thismonth")
 
-    # Auto-seed members if missing — guards against volume timing issues
-    if not g.all_members():
-        _auto_seed_members()
-
-    # Always serve from cache if data exists — freshness is handled by background refresh
+    # Serve from cache if available
     cached, fetched_at = get_cached(period)
     if cached:
         age = cache_age_seconds(fetched_at)
         resp = jsonify(cached)
         resp.headers["X-Cache"] = "HIT"
-        resp.headers["X-Cache-Age"] = str(int(age)) if age is not None else "unknown"
+        resp.headers["X-Cache-Age"] = str(int(age)) if age is not None else "?"
         resp.headers["X-Cache-Fetched"] = fetched_at or ""
         return resp
 
-    # Cache is empty (first ever run) — fetch live and populate
-    log.info("Cache empty for period=%s — fetching live", period)
+    # Cache miss — fetch live and populate cache
+    log.info("Cache miss for period=%s — fetching live", period)
     results = load_team(period)
-    if results is not None and period in CACHED_PERIODS:
+    if results and period in CACHED_PERIODS:
         set_cached(period, results)
-    resp = jsonify(results or [])
+    resp = jsonify(results)
     resp.headers["X-Cache"] = "MISS"
     return resp
 
@@ -1079,296 +961,6 @@ def api_refresh():
         daemon=True,
     ).start()
     return jsonify({"status": "refresh started"})
-
-
-@app.get("/api/admin/garmin-pause")
-def api_garmin_pause():
-    """Block all Garmin API calls — dashboard still serves cached data."""
-    set_garmin_paused(True)
-    set_setting("garmin_paused_since", datetime.now(timezone.utc).isoformat())
-    log.info("Garmin API calls PAUSED via admin endpoint")
-    return jsonify({"status": "paused", "garmin_paused": True})
-
-
-@app.get("/api/admin/garmin-resume")
-def api_garmin_resume():
-    """Re-enable Garmin API calls."""
-    set_garmin_paused(False)
-    set_setting("garmin_paused_since", "")
-    log.info("Garmin API calls RESUMED via admin endpoint")
-    return jsonify({"status": "resumed", "garmin_paused": False})
-
-
-@app.get("/api/admin/garmin-paused")
-def api_garmin_paused():
-    """Check whether Garmin API calls are currently paused."""
-    paused = is_garmin_paused()
-    since  = get_setting("garmin_paused_since", "") if paused else ""
-    return jsonify({"garmin_paused": paused, "paused_since": since})
-
-
-@app.post("/api/admin/restore-members")
-def api_restore_members():
-    """
-    Restore members.json from a provided JSON body.
-    POST { "members": [...], "secret": "fette-otter-restore" }
-    """
-    body = request.get_json(silent=True) or {}
-    if body.get("secret") != "fette-otter-restore":
-        return jsonify({"error": "Forbidden"}), 403
-    members = body.get("members")
-    if not members or not isinstance(members, list):
-        return jsonify({"error": "members array required"}), 400
-    import json as _json
-    squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
-    squad_home.mkdir(parents=True, exist_ok=True)
-    members_file = squad_home / "members.json"
-    members_file.write_text(_json.dumps(members, indent=2))
-    log.info("members.json restored with %d members", len(members))
-    return jsonify({"status": "ok", "members_restored": len(members)})
-
-
-@app.get("/api/admin/seed-members")
-def api_seed_members():
-    """
-    Restore the original 5 members to members.json.
-    Only runs if members.json is empty — will not overwrite existing members.
-    """
-    existing = g.all_members()
-    if existing:
-        return jsonify({"status": "skipped", "reason": "members already exist", "count": len(existing)})
-
-    import os
-    squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
-    members_file = squad_home / "members.json"
-
-    seed = [
-        {"id":1,"name":"Martin", "role":"admin","emoji":"🦁","color":"#7c3aed","bg":"#ede9fe","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-        {"id":2,"name":"Okonski","role":"Brew Crew","emoji":"🐯","color":"#db2777","bg":"#fce7f3","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-        {"id":3,"name":"Alex",   "role":"Brew Crew","emoji":"🦊","color":"#0284c7","bg":"#e0f2fe","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-        {"id":4,"name":"Marc",   "role":"Brew Crew","emoji":"🐺","color":"#b45309","bg":"#fef3c7","provider":"strava","garminDevice":"","types":[],"picture":"","google_email":""},
-        {"id":5,"name":"Jan",    "role":"Brew Crew","emoji":"🦅","color":"#059669","bg":"#d1fae5","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-    ]
-
-    import json as _json
-    squad_home.mkdir(parents=True, exist_ok=True)
-    with open(members_file, "w") as f:
-        _json.dump(seed, f, indent=2)
-    log.info("Members seeded via /api/admin/seed-members")
-    return jsonify({"status": "seeded", "count": len(seed), "members": [m["name"] for m in seed]})
-
-
-@app.get("/api/admin/force-cache")
-def api_force_cache():
-    """Force a synchronous team fetch and write to cache — bypasses all guards."""
-    results = {}
-    for period in CACHED_PERIODS:
-        try:
-            data = load_team(period)
-            set_cached(period, data)
-            live = sum(1 for u in data if not u.get("_stub"))
-            results[period] = {"users": len(data), "live": live, "status": "ok"}
-        except Exception as exc:
-            results[period] = {"status": "error", "error": str(exc)}
-    return jsonify(results)
-
-
-@app.get("/api/admin/nuke")
-def api_nuke():
-    """Destroy ALL data — cache, members, and token files. Nuclear option."""
-    from api.cache import _connect
-    import shutil
-    squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
-    destroyed = []
-
-    # 1. Clear all DB tables
-    try:
-        with _connect() as conn:
-            conn.execute("DELETE FROM team_cache")
-            conn.execute("DELETE FROM refresh_log")
-            conn.execute("DELETE FROM settings")
-            conn.commit()
-        destroyed.append("database tables")
-    except Exception as exc:
-        log.error("Nuke DB failed: %s", exc)
-
-    # 2. Delete all user token directories
-    try:
-        for item in squad_home.iterdir():
-            if item.is_dir() and item.name not in ('lost+found',) and not item.name.startswith('.'):
-                shutil.rmtree(item)
-                destroyed.append(f"tokens/{item.name}")
-    except Exception as exc:
-        log.error("Nuke tokens failed: %s", exc)
-
-    # 3. Delete members.json
-    members_file = squad_home / "members.json"
-    try:
-        if members_file.exists():
-            members_file.unlink()
-            destroyed.append("members.json")
-    except Exception as exc:
-        log.error("Nuke members failed: %s", exc)
-
-    log.warning("NUKE executed — destroyed: %s", destroyed)
-    return jsonify({"status": "destroyed", "destroyed": destroyed})
-
-
-@app.get("/api/admin/clear-cache")
-def api_clear_cache():
-    """Clear all cached periods and trigger a fresh background refresh."""
-    from api.cache import _connect
-    try:
-        with _connect() as conn:
-            conn.execute("DELETE FROM team_cache")
-            conn.commit()
-        log.info("Cache cleared via /api/admin/clear-cache")
-    except Exception as exc:
-        log.error("Cache clear failed: %s", exc)
-        return jsonify({"error": str(exc)}), 500
-    threading.Thread(
-        target=refresh_all_periods,
-        args=(load_team,),
-        daemon=True,
-    ).start()
-    return jsonify({"status": "cache cleared, refresh started"})
-
-
-@app.get("/api/team/trigger-refresh")
-def api_trigger_refresh():
-    """
-    Trigger a background refresh for all cached periods without waiting.
-    Returns immediately with a refresh_id the client can poll.
-    Only triggers if no refresh is already in progress.
-    """
-    import uuid
-    with _refresh_lock:
-        if _refresh_in_progress.get("active"):
-            return jsonify({"status": "already_running", "refresh_id": _refresh_in_progress.get("id")})
-        refresh_id = str(uuid.uuid4())[:8]
-        _refresh_in_progress["active"] = True
-        _refresh_in_progress["id"] = refresh_id
-        _refresh_in_progress["started_at"] = datetime.now(timezone.utc).isoformat()
-        _refresh_in_progress["completed"] = False
-
-    def _do_refresh():
-        try:
-            refresh_all_periods(load_team)
-        finally:
-            with _refresh_lock:
-                _refresh_in_progress["active"] = False
-                _refresh_in_progress["completed"] = True
-                _refresh_in_progress["finished_at"] = datetime.now(timezone.utc).isoformat()
-
-    threading.Thread(target=_do_refresh, daemon=True).start()
-    return jsonify({"status": "started", "refresh_id": refresh_id})
-
-
-@app.get("/api/team/refresh-status")
-def api_refresh_status():
-    """Poll this to check if a background refresh has completed."""
-    _, fetched_at = get_cached("thismonth")
-    return jsonify({
-        "active":      _refresh_in_progress.get("active", False),
-        "completed":   _refresh_in_progress.get("completed", False),
-        "refresh_id":  _refresh_in_progress.get("id"),
-        "started_at":  _refresh_in_progress.get("started_at"),
-        "finished_at": _refresh_in_progress.get("finished_at"),
-        "fetched_at":  fetched_at,
-    })
-
-
-
-@app.get("/api/garmin-status")
-def api_garmin_status():
-    """
-    Check Garmin status without making any API calls.
-    Reads only from DB cache and token files — safe to call frequently.
-    """
-    from api.cache import _connect
-    members = g.all_members()
-    member_status = []
-    for m in members:
-        uid = m["id"]
-        token_dir = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad")) / str(uid)
-        token_files = [f.name for f in token_dir.iterdir()] if token_dir.exists() else []
-        member_status.append({
-            "id":           uid,
-            "name":         m["name"],
-            "provider":     m.get("provider", "garmin"),
-            "token_exists": token_dir.exists() and len(token_files) > 0,
-            "token_files":  token_files,
-        })
-
-    # Read cache ages from DB without fetching anything
-    cache_info = {}
-    try:
-        with _connect() as conn:
-            rows = conn.execute(
-                "SELECT period, fetched_at, length(payload) as payload_bytes FROM team_cache"
-            ).fetchall()
-        for row in rows:
-            age = cache_age_seconds(row["fetched_at"])
-            cache_info[row["period"]] = {
-                "fetched_at":   row["fetched_at"],
-                "age_minutes":  round(age / 60, 1) if age is not None else None,
-                "payload_bytes": row["payload_bytes"],
-            }
-    except Exception as exc:
-        cache_info = {"error": str(exc)}
-
-    return jsonify({
-        "members":    member_status,
-        "cache":      cache_info,
-        "tip":        "This endpoint makes zero Garmin/Strava API calls — safe to poll freely.",
-    })
-
-
-
-@app.get("/api/admin/cache-inspect")
-def api_cache_inspect():
-    """Show raw cache DB contents — row count and fetched_at per period."""
-    from api.cache import _connect
-    try:
-        with _connect() as conn:
-            rows = conn.execute(
-                "SELECT period, fetched_at, version, length(payload) as payload_bytes FROM team_cache"
-            ).fetchall()
-        return jsonify({
-            "row_count": len(rows),
-            "entries": [dict(r) for r in rows],
-        })
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.get("/api/admin/cache-peek")
-def api_cache_peek():
-    """Peek at each user's data in the cache — shows if stubs or real data, zero API calls."""
-    from api.cache import _connect
-    import json as _json
-    try:
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT payload FROM team_cache WHERE period = 'thismonth'"
-            ).fetchone()
-        if not row:
-            return jsonify({"error": "no cache for thismonth"})
-        users = _json.loads(row["payload"])
-        summary = []
-        for u in users:
-            summary.append({
-                "name":        u.get("name"),
-                "provider":    u.get("provider", "garmin"),
-                "is_stub":     u.get("_stub", False),
-                "km":          u.get("km", 0),
-                "runKm":       u.get("runKm", 0),
-                "workouts":    u.get("workouts", 0),
-                "challengeKm": u.get("challengeKm", 0),
-            })
-        return jsonify({"users": summary})
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
 
 
 @app.get("/api/cache-status")
@@ -1397,35 +989,173 @@ def get_user(user_id: int):
     return jsonify(payload)
 
 
-# ── Auto-seed members on startup if members.json is missing/empty ─────────────
-def _auto_seed_members():
-    """Restore default members if members.json is empty — runs on every startup."""
-    try:
-        existing = g.all_members()
-        if not existing:
-            import json as _json
-            squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
-            members_file = squad_home / "members.json"
-            seed = [
-                {"id":1,"name":"Martin", "role":"admin",     "emoji":"🦁","color":"#7c3aed","bg":"#ede9fe","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-                {"id":2,"name":"Okonski","role":"Brew Crew",  "emoji":"🐯","color":"#db2777","bg":"#fce7f3","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-                {"id":3,"name":"Alex",   "role":"Brew Crew",  "emoji":"🦊","color":"#0284c7","bg":"#e0f2fe","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-                {"id":4,"name":"Marc",   "role":"Brew Crew",  "emoji":"🐺","color":"#b45309","bg":"#fef3c7","provider":"strava","garminDevice":"",      "types":[],"picture":"","google_email":""},
-                {"id":5,"name":"Jan",    "role":"Brew Crew",  "emoji":"🦅","color":"#059669","bg":"#d1fae5","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
-            ]
-            squad_home.mkdir(parents=True, exist_ok=True)
-            with open(members_file, "w") as f:
-                _json.dump(seed, f, indent=2)
-            log.info("Auto-seeded %d members on startup", len(seed))
-        else:
-            log.info("Members OK on startup — %d members found", len(existing))
-    except Exception as exc:
-        log.warning("Auto-seed members failed: %s", exc)
+@app.get("/api/admin/garmin-pause")
+def api_garmin_pause():
+    """Block all Garmin API calls — dashboard still serves cached data."""
+    set_garmin_paused(True)
+    set_setting("garmin_paused_since", datetime.now(timezone.utc).isoformat())
+    log.info("Garmin API calls PAUSED")
+    return jsonify({"status": "paused", "garmin_paused": True})
 
-_auto_seed_members()
+
+@app.get("/api/admin/garmin-resume")
+def api_garmin_resume():
+    """Re-enable Garmin API calls."""
+    set_garmin_paused(False)
+    set_setting("garmin_paused_since", "")
+    log.info("Garmin API calls RESUMED")
+    return jsonify({"status": "resumed", "garmin_paused": False})
+
+
+@app.get("/api/admin/garmin-paused")
+def api_garmin_paused():
+    """Check whether Garmin API calls are currently paused."""
+    paused = is_garmin_paused()
+    since  = get_setting("garmin_paused_since", "") if paused else ""
+    return jsonify({"garmin_paused": paused, "paused_since": since})
+
+
+@app.get("/api/admin/clear-cache")
+def api_clear_cache():
+    """Clear all cached periods."""
+    from api.cache import _connect
+    try:
+        with _connect() as conn:
+            conn.execute("DELETE FROM team_cache")
+            conn.commit()
+        log.info("Cache cleared")
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    threading.Thread(target=refresh_all_periods, args=(load_team,), daemon=True).start()
+    return jsonify({"status": "cache cleared, refresh started"})
+
+
+@app.get("/api/admin/force-cache")
+def api_force_cache():
+    """Force a synchronous fetch and write to cache."""
+    results = {}
+    for period in CACHED_PERIODS:
+        try:
+            data = load_team(period)
+            set_cached(period, data)
+            live = sum(1 for u in data if not u.get("_stub"))
+            results[period] = {"users": len(data), "live": live, "status": "ok"}
+        except Exception as exc:
+            results[period] = {"status": "error", "error": str(exc)}
+    return jsonify(results)
+
+
+@app.get("/api/garmin-status")
+def api_garmin_status():
+    """Check Garmin/token status without making any API calls."""
+    from api.cache import _connect
+    members = g.all_members()
+    member_status = []
+    for m in members:
+        uid = m["id"]
+        token_dir = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad")) / str(uid)
+        token_files = [f.name for f in token_dir.iterdir()] if token_dir.exists() else []
+        member_status.append({
+            "id": uid, "name": m["name"],
+            "provider": m.get("provider", "garmin"),
+            "token_exists": token_dir.exists() and len(token_files) > 0,
+            "token_files": token_files,
+        })
+    cache_info = {}
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT period, fetched_at, length(payload) as payload_bytes FROM team_cache"
+            ).fetchall()
+        for row in rows:
+            age = cache_age_seconds(row["fetched_at"])
+            cache_info[row["period"]] = {
+                "fetched_at": row["fetched_at"],
+                "age_minutes": round(age / 60, 1) if age is not None else None,
+                "payload_bytes": row["payload_bytes"],
+            }
+    except Exception as exc:
+        cache_info = {"error": str(exc)}
+    return jsonify({"members": member_status, "cache": cache_info,
+                    "tip": "This endpoint makes zero Garmin/Strava API calls."})
+
+
+@app.get("/api/admin/cache-inspect")
+def api_cache_inspect():
+    """Show raw cache DB contents."""
+    from api.cache import _connect
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT period, fetched_at, version, length(payload) as payload_bytes FROM team_cache"
+            ).fetchall()
+        return jsonify({"row_count": len(rows), "entries": [dict(r) for r in rows]})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/admin/cache-peek")
+def api_cache_peek():
+    """Check if cached users are real or stubs."""
+    from api.cache import _connect
+    import json as _json
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM team_cache WHERE period = 'thismonth'"
+            ).fetchone()
+        if not row:
+            return jsonify({"error": "no cache for thismonth"})
+        users = _json.loads(row["payload"])
+        return jsonify({"users": [{
+            "name": u.get("name"), "provider": u.get("provider", "garmin"),
+            "is_stub": u.get("_stub", False), "km": u.get("km", 0),
+            "workouts": u.get("workouts", 0), "challengeKm": u.get("challengeKm", 0),
+        } for u in users]})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/team/trigger-refresh")
+def api_trigger_refresh():
+    """Trigger a background refresh."""
+    import uuid
+    with _refresh_lock:
+        if _refresh_in_progress.get("active"):
+            return jsonify({"status": "already_running"})
+        refresh_id = str(uuid.uuid4())[:8]
+        _refresh_in_progress["active"] = True
+        _refresh_in_progress["id"] = refresh_id
+        _refresh_in_progress["started_at"] = datetime.now(timezone.utc).isoformat()
+        _refresh_in_progress["completed"] = False
+
+    def _do_refresh():
+        try:
+            refresh_all_periods(load_team)
+        finally:
+            with _refresh_lock:
+                _refresh_in_progress["active"] = False
+                _refresh_in_progress["completed"] = True
+                _refresh_in_progress["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    threading.Thread(target=_do_refresh, daemon=True).start()
+    return jsonify({"status": "started", "refresh_id": refresh_id})
+
+
+@app.get("/api/team/refresh-status")
+def api_refresh_status():
+    """Poll refresh completion status."""
+    _, fetched_at = get_cached("thismonth")
+    return jsonify({
+        "active":     _refresh_in_progress.get("active", False),
+        "completed":  _refresh_in_progress.get("completed", False),
+        "refresh_id": _refresh_in_progress.get("id"),
+        "fetched_at": fetched_at,
+    })
+
 
 # ── Start background scheduler (after load_team is defined) ──────────────────
-# Background scheduler disabled — refreshes triggered by user visits only
+start_scheduler(load_team)
 
 
 if __name__ == "__main__":
