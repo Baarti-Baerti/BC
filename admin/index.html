@@ -343,6 +343,8 @@
     <button class="btn btn-green"  id="btnResume"  onclick="garminResume()">▶ Resume Garmin</button>
     <button class="btn btn-yellow" id="btnClear"   onclick="clearCache()">🗑 Clear Cache</button>
     <button class="btn btn-blue"   id="btnRefresh" onclick="triggerRefresh()">↻ Trigger Refresh</button>
+    <button class="btn btn-blue"   id="btnForce"   onclick="forceCache()">⚡ Force Cache</button>
+    <button class="btn btn-red"    id="btnNuke"    onclick="confirmNuke()" style="border-color:rgba(255,77,109,0.6);background:rgba(255,77,109,0.18)">☠ Clear All Data</button>
     <a href="https://baarti-baerti.github.io/Fette-Otter/fette-otter.html"
        class="btn btn-blue" style="text-decoration:none">← Back to Dashboard</a>
   </div>
@@ -407,6 +409,24 @@
 
   <div class="last-updated">Last updated: <span id="lastUpdated">—</span></div>
 
+</div>
+
+<!-- Nuke confirmation modal -->
+<div id="nukeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9998;display:none;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--red);border-radius:16px;padding:32px;max-width:420px;width:90%;text-align:center">
+    <div style="font-size:3rem;margin-bottom:12px">☠️</div>
+    <div style="font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:800;color:var(--red);margin-bottom:12px">Destroy All Data?</div>
+    <div style="font-size:0.82rem;color:var(--muted);line-height:1.6;margin-bottom:24px">
+      This will permanently delete <strong style="color:var(--text)">all cached data, all member records, and all tokens</strong> from the database.<br><br>
+      Every user will need to re-authenticate. This cannot be undone.
+    </div>
+    <div style="display:flex;gap:12px;justify-content:center">
+      <button class="btn btn-red" id="btnNukeConfirm" onclick="nukeAllData()" style="border-color:rgba(255,77,109,0.6);background:rgba(255,77,109,0.18)">
+        ☠ Yes, destroy everything
+      </button>
+      <button class="btn btn-blue" onclick="closeNukeModal()">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -706,6 +726,47 @@ async function testGarminDebug() {
     result.style.color = 'var(--red)';
     result.textContent = '❌ Request failed: ' + e.message;
   }
+}
+
+async function forceCache() {
+  document.getElementById('btnForce').disabled = true;
+  document.getElementById('btnForce').textContent = '⟳ Fetching…';
+  showToast('⚡ Force fetching all periods — this may take 60s…', 8000);
+  try {
+    const data = await api('/api/admin/force-cache');
+    const summary = Object.entries(data).map(([p, r]) =>
+      `${p}: ${r.status === 'ok' ? `${r.live}/${r.users} live` : `❌ ${r.error}`}`
+    ).join(' | ');
+    showToast(`✅ Force cache done — ${summary}`, 6000);
+    await loadAll();
+  } catch(e) {
+    showToast('❌ Force cache failed: ' + e.message);
+  }
+  document.getElementById('btnForce').disabled = false;
+  document.getElementById('btnForce').textContent = '⚡ Force Cache';
+}
+
+function confirmNuke() {
+  document.getElementById('nukeModal').style.display = 'flex';
+}
+
+function closeNukeModal() {
+  document.getElementById('nukeModal').style.display = 'none';
+}
+
+async function nukeAllData() {
+  document.getElementById('btnNukeConfirm').disabled = true;
+  document.getElementById('btnNukeConfirm').textContent = '⟳ Destroying…';
+  try {
+    await api('/api/admin/nuke');
+    showToast('☠ All data destroyed. Users must re-authenticate.', 6000);
+    closeNukeModal();
+    await loadAll();
+  } catch(e) {
+    showToast('❌ Nuke failed: ' + e.message);
+  }
+  document.getElementById('btnNukeConfirm').disabled = false;
+  document.getElementById('btnNukeConfirm').textContent = '☠ Yes, destroy everything';
 }
 
 function fmtAge(secs) {
