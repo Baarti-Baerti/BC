@@ -1115,6 +1115,62 @@ def api_force_cache():
     return jsonify(results)
 
 
+@app.get("/api/admin/force-cache")
+def api_force_cache():
+    """Force a synchronous team fetch and write to cache — bypasses all guards."""
+    results = {}
+    for period in CACHED_PERIODS:
+        try:
+            data = load_team(period)
+            set_cached(period, data)
+            live = sum(1 for u in data if not u.get("_stub"))
+            results[period] = {"users": len(data), "live": live, "status": "ok"}
+        except Exception as exc:
+            results[period] = {"status": "error", "error": str(exc)}
+    return jsonify(results)
+
+
+@app.get("/api/admin/nuke")
+def api_nuke():
+    """Destroy ALL data — cache, members, and token files. Nuclear option."""
+    from api.cache import _connect
+    import shutil
+    squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
+    destroyed = []
+
+    # 1. Clear all DB tables
+    try:
+        with _connect() as conn:
+            conn.execute("DELETE FROM team_cache")
+            conn.execute("DELETE FROM refresh_log")
+            conn.execute("DELETE FROM settings")
+            conn.commit()
+        destroyed.append("database tables")
+    except Exception as exc:
+        log.error("Nuke DB failed: %s", exc)
+
+    # 2. Delete all user token directories
+    try:
+        for item in squad_home.iterdir():
+            if item.is_dir() and item.name not in ('lost+found',) and not item.name.startswith('.'):
+                shutil.rmtree(item)
+                destroyed.append(f"tokens/{item.name}")
+    except Exception as exc:
+        log.error("Nuke tokens failed: %s", exc)
+
+    # 3. Delete members.json
+    members_file = squad_home / "members.json"
+    try:
+        if members_file.exists():
+            members_file.unlink()
+            destroyed.append("members.json")
+    except Exception as exc:
+        log.error("Nuke members failed: %s", exc)
+
+    log.warning("NUKE executed — destroyed: %s", destroyed)
+    return jsonify({"status": "destroyed", "destroyed": destroyed})
+
+
 @app.get("/api/admin/clear-cache")
 def api_clear_cache():
     """Clear all cached periods and trigger a fresh background refresh."""
