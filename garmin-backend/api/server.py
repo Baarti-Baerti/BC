@@ -989,6 +989,9 @@ def load_team(period: str) -> list[dict]:
     import time
     members = g.all_members()
     if not members:
+        _auto_seed_members()
+        members = g.all_members()
+    if not members:
         return []
     range_start, range_end = _range_dates(period)
 
@@ -1038,6 +1041,10 @@ CACHE_MAX_AGE_SECONDS = 15 * 60  # used only for X-Cache-Age header info
 @app.get("/api/team")
 def get_team():
     period = request.args.get("range", "thismonth")
+
+    # Auto-seed members if missing — guards against volume timing issues
+    if not g.all_members():
+        _auto_seed_members()
 
     # Always serve from cache if data exists — freshness is handled by background refresh
     cached, fetched_at = get_cached(period)
@@ -1389,6 +1396,33 @@ def get_user(user_id: int):
     payload["google_email"] = member.get("google_email", "")
     return jsonify(payload)
 
+
+# ── Auto-seed members on startup if members.json is missing/empty ─────────────
+def _auto_seed_members():
+    """Restore default members if members.json is empty — runs on every startup."""
+    try:
+        existing = g.all_members()
+        if not existing:
+            import json as _json
+            squad_home = Path(os.environ.get("GARTH_SQUAD_HOME", Path.home() / ".garth_squad"))
+            members_file = squad_home / "members.json"
+            seed = [
+                {"id":1,"name":"Martin", "role":"admin",     "emoji":"🦁","color":"#7c3aed","bg":"#ede9fe","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
+                {"id":2,"name":"Okonski","role":"Brew Crew",  "emoji":"🐯","color":"#db2777","bg":"#fce7f3","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
+                {"id":3,"name":"Alex",   "role":"Brew Crew",  "emoji":"🦊","color":"#0284c7","bg":"#e0f2fe","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
+                {"id":4,"name":"Marc",   "role":"Brew Crew",  "emoji":"🐺","color":"#b45309","bg":"#fef3c7","provider":"strava","garminDevice":"",      "types":[],"picture":"","google_email":""},
+                {"id":5,"name":"Jan",    "role":"Brew Crew",  "emoji":"🦅","color":"#059669","bg":"#d1fae5","provider":"garmin","garminDevice":"Garmin","types":[],"picture":"","google_email":""},
+            ]
+            squad_home.mkdir(parents=True, exist_ok=True)
+            with open(members_file, "w") as f:
+                _json.dump(seed, f, indent=2)
+            log.info("Auto-seeded %d members on startup", len(seed))
+        else:
+            log.info("Members OK on startup — %d members found", len(existing))
+    except Exception as exc:
+        log.warning("Auto-seed members failed: %s", exc)
+
+_auto_seed_members()
 
 # ── Start background scheduler (after load_team is defined) ──────────────────
 # Background scheduler disabled — refreshes triggered by user visits only
